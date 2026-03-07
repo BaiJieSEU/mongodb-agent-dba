@@ -1,0 +1,21 @@
+mongodb:
+  agent_store: "mongodb://localhost:27017"
+  monitored_cluster: "mongodb://localhost:27018"
+  
+ollama:
+  base_url: "http://localhost:11434"
+  model: "qwen2.5-coder:7b"
+  
+agent:
+  slow_query_threshold_ms: 5
+  max_queries_to_analyze: 10
+  investigation_timeout: 60
+  
+logging:
+  level: "INFO"
+  format: "json"
+  
+demo:
+  users_count: 100000
+  products_count: 10000
+  orders_count: 50000
