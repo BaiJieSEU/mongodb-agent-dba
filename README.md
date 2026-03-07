@@ -1,14 +1,24 @@
 # MongoDB AI Agent DBA - Proof of Concept
 
-**Problem Statement**: Human DBAs are expensive ($200/hour), require sleep, lack 24/7 availability, and are slow (2-4 hours per investigation). This POC explores replacing human DBAs with an autonomous AI agent that provides instant, expert-level performance tuning recommendations.
+## Problem Statement
+
+Can Agentic AI replace human MongoDB DBAs for operational tasks 
+in Enterprise Advanced environments?
+
+This POC explores one specific workflow: autonomous slow query 
+investigation — detecting issues, reasoning about root causes, 
+and generating specific fix commands without human input.
+
+The key question: does the agent reason dynamically like a DBA, 
+or just follow a fixed script?
 
 ## 🎯 POC Objectives
 
-**Primary Goal**: Demonstrate that an AI agent can match or exceed junior DBA expertise in MongoDB performance analysis while being:
-- **99% faster**: 2 minutes vs 2-4 hours for investigation
+**Primary Goal**: Demonstrate that an AI agent can perform MongoDB performance analysis while being:
+- **Autonomous**: Self-directed investigation without human guidance
 - **Available 24/7**: No human resource constraints  
-- **Consistent quality**: Same expert analysis every time
-- **Cost effective**: Eliminate $200/hour DBA consultation fees
+- **Consistent quality**: Same analysis approach every time
+- **Reasoning-based**: Dynamic problem solving, not scripted responses
 
 ## 🚀 Agent Capabilities
 
@@ -21,7 +31,7 @@
 
 ### Smart Recommendations
 - **Specific Commands**: Copy-paste MongoDB commands, not vague advice
-- **Performance Predictions**: Expected improvement percentages (90-99% typical)
+- **Performance Predictions**: Expected improvement assessments
 - **Priority Classification**: Critical/High/Medium/Low based on impact
 - **Demo Stability**: Time-anchored analysis works consistently regardless of when triggered
 
@@ -181,7 +191,7 @@ agent:
 3. **Advanced Models**: Integration with GPT-4o for complex scenarios
 4. **Security Enhancement**: Enterprise authentication and audit logging
 
-**POC Status**: ✅ **SUCCESSFUL** - Ready for production development planning
+**POC Status**: 🔬 **In Progress** - MVP scope: slow query investigation
 
 ## 📝 License
 
