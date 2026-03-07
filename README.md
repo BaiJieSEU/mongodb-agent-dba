@@ -1,4 +1,4 @@
-# MongoDB AI Agent DBA - Proof of Concept
+# MongoDB DBA Agent — POC
 
 ## Problem Statement
 
@@ -33,7 +33,6 @@ or just follow a fixed script?
 - **Specific Commands**: Copy-paste MongoDB commands, not vague advice
 - **Performance Predictions**: Expected improvement assessments
 - **Priority Classification**: Critical/High/Medium/Low based on impact
-- **Demo Stability**: Time-anchored analysis works consistently regardless of when triggered
 
 ## 🏗 Technical Architecture
 
@@ -69,7 +68,7 @@ or just follow a fixed script?
 - **Data Sovereignty**: LLM runs locally, client data never leaves environment
 - **Cost Efficiency**: No per-token charges for high-volume analysis
 - **Modularity**: Easy to add new analysis tools or upgrade LLM models
-- **Production Ready**: Designed for enterprise deployment patterns
+- **Extensible**: Designed to support enterprise deployment patterns
 
 > 📋 **Detailed Architecture**: See [architecture_diagram.md](architecture_diagram.md) for comprehensive system diagrams and component details.
 
@@ -190,6 +189,7 @@ agent:
 2. **Multi-Database Support**: Analyze multiple clusters simultaneously  
 3. **Advanced Models**: Integration with GPT-4o for complex scenarios
 4. **Security Enhancement**: Enterprise authentication and audit logging
+5. **Human-in-the-loop**: Approval workflow for index creation and schema changes
 
 **POC Status**: 🔬 **In Progress** - MVP scope: slow query investigation
 
