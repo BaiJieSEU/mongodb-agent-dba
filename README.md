@@ -138,6 +138,31 @@ python src/main.py "check slow queries"
 python src/main.py "check my indexes"
 ```
 
+### Sample Output
+```
+🔍 SLOW QUERY INVESTIGATION COMPLETE
+
+Found 3 slow queries in database 'testdb'
+
+Issue #1 [CRITICAL] — Full Collection Scan
+  Query: db.users.find({email: "user@example.com"})
+  Problem: COLLSCAN — examined 50,000 docs, returned 1
+  Fix: db.users.createIndex({email: 1})
+
+Issue #2 [HIGH] — $where Disables Index
+  Query: db.users.find({$where: "this.status == 'active'"})
+  Problem: JavaScript execution, index ignored
+  Fix: db.users.find({status: "active"})
+
+Issue #3 [MEDIUM] — Inefficient Regex
+  Query: db.products.find({name: {$regex: "widget"}})
+  Problem: Unanchored regex causes full scan
+  Fix: db.products.find({name: {$regex: "^widget"}})
+
+🎯 Investigation completed in 1.3 seconds
+💡 3 specific optimizations identified
+```
+
 ## 📁 Project Structure
 
 ```
