@@ -1,224 +1,165 @@
-# MongoDB DBA Agent — POC
+# MongoDB DBA Agent
 
-## Problem Statement
+## Overview
 
-Can Agentic AI replace human MongoDB DBAs for operational tasks 
-in Enterprise Advanced environments?
+Agentic AI system for MongoDB database administration that learns from past investigations and provides intelligent recommendations.
 
-This POC explores one specific workflow: autonomous slow query 
-investigation — detecting issues, reasoning about root causes, 
-and generating specific fix commands without human input.
+**Key Features:**
+- **Natural Language Interface**: Understands human queries like "my database is slow"
+- **Intelligent Analysis**: LLM-driven tool selection and reasoning
+- **Persistent Memory**: Learns from past investigations using MongoDB storage
+- **Local Operation**: No external API calls - runs entirely on local infrastructure
 
-The key question: does the agent reason dynamically like a DBA, 
-or just follow a fixed script?
+**Scope**: Foundation system for performance analysis, metadata inspection, and query optimization with memory-enhanced learning capabilities.
 
-## 🎯 POC Objectives
+## Architecture
 
-**Primary Goal**: Demonstrate that an AI agent can perform MongoDB performance analysis while being:
-- **Autonomous**: Self-directed investigation without human guidance
-- **Available 24/7**: No human resource constraints  
-- **Consistent quality**: Same analysis approach every time
-- **Reasoning-based**: Dynamic problem solving, not scripted responses
+![Architecture Diagram](architecture.svg)
 
-## 🚀 Agent Capabilities
+See [detailed architecture documentation](architecture_diagram.md) for complete system design.
 
-### Core Investigation Features
-- **Autonomous Analysis**: Agent decides investigation strategy based on findings
-- **Profiler Integration**: Automatically fetches slow queries from MongoDB profiler
-- **Explain Analysis**: Runs `explain()` on problematic queries to identify bottlenecks
-- **Index Optimization**: Detects missing indexes and suggests compound index strategies  
-- **Pattern Recognition**: Identifies MongoDB anti-patterns ($where, unanchored regex, collection scans)
+### Core Components
 
-### Smart Recommendations
-- **Specific Commands**: Copy-paste MongoDB commands, not vague advice
-- **Performance Predictions**: Expected improvement assessments
-- **Priority Classification**: Critical/High/Medium/Low based on impact
+- **CLI Interface** (`main_agentic.py`) - Rich console interface with prerequisites checking
+- **Intelligent Agent** (`intelligent_agentic_agent.py`) - LLM-driven analysis with memory integration
+- **Analysis Tools** - SlowQueryFetcher, QueryExplainer, IndexChecker, MetadataInspector
+- **Memory System** (`agent_memory.py`) - MongoDB-based persistent learning
+- **Dual MongoDB Setup** - Agent memory store (27017) and monitored database (27018)
 
-## 🏗 Technical Architecture
 
-### System Overview
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│ User Query      │───▶│ LangGraph Agent │───▶│ Analysis Report │
-│ "DB is slow?"   │    │ + Local LLM     │    │ + Commands      │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-                              │
-                              ▼
-                    ┌─────────────────────────────────────┐
-                    │     Specialized Analysis Tools     │
-                    ├─────────────────────────────────────┤
-                    │ SlowQueryFetcher │ QueryExplainer  │
-                    │ IndexChecker     │ RecommendationGen│
-                    └─────────────────────────────────────┘
-                              │
-                              ▼
-                    ┌─────────────────┐    ┌─────────────────┐
-                    │ Agent Storage   │    │ Monitored DB    │
-                    │ MongoDB:27017   │    │ MongoDB:27018   │
-                    └─────────────────┘    └─────────────────┘
-```
 
-### Agent-Based Design
-- **LangGraph Orchestrator**: Stateful workflow engine coordinating specialized tools
-- **Local LLM**: Ollama with qwen2.5-coder:7b for MongoDB-specific code analysis
-- **Specialized Tools**: 4 dedicated analyzers for different performance aspects
-- **Dual MongoDB Setup**: Separate agent storage and monitored cluster
+### Workflow
+1. **Intent Analysis** - LLM classifies user requests (metadata, performance, general)
+2. **Memory Lookup** - Retrieves context from past investigations  
+3. **Tool Selection** - LLM chooses appropriate analysis tools
+4. **Execution** - Runs selected tools and collects results
+5. **Synthesis** - Generates memory-aware recommendations
+6. **Storage** - Saves investigation for future learning
 
-### Why This Architecture?
-- **Data Sovereignty**: LLM runs locally, client data never leaves environment
-- **Cost Efficiency**: No per-token charges for high-volume analysis
-- **Modularity**: Easy to add new analysis tools or upgrade LLM models
-- **Extensible**: Designed to support enterprise deployment patterns
+## Quick Start
 
-> 📋 **Detailed Architecture**: See [architecture_diagram.md](architecture_diagram.md) for comprehensive system diagrams and component details.
+### Prerequisites
+- Python 3.11+
+- MongoDB 8.0+ (two instances: ports 27017, 27018)
+- Ollama with qwen2.5-coder:7b model
 
-## 📋 Prerequisites
-
-1. **Python 3.11+**
-2. **MongoDB 8.0.4** running on both ports 27017 and 27018
-3. **Ollama** with qwen2.5-coder:7b model
-
-## 🔧 Setup
-
-### 1. Install Dependencies
-
+### Installation
 ```bash
+# 1. Setup environment
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-```
 
-### 2. Setup MongoDB Instances
+# 2. Start MongoDB instances
+mongod --config ~/mongodb/config/mongod.conf      # Agent memory (27017)
+mongod --config ~/mongodb/config/mongod2.conf     # Monitored DB (27018)
 
-```bash
-# First instance (agent store) - already running on 27017
-# Second instance (monitored cluster) 
-mongod --port 27018 --dbpath ~/mongodb/data2 --logpath ~/mongodb/logs/mongod2.log --replSet rs1 --fork
-
-# Initialize second replica set
-mongosh --port 27018 --eval "rs.initiate({_id: 'rs1', members: [{_id: 0, host: 'localhost:27018'}]})"
-```
-
-### 3. Install and Setup Ollama
-
-```bash
-# Install Ollama (if not already installed)
-# Download from: https://ollama.ai
-
-# Pull the required model
+# 3. Setup LLM
+ollama serve
 ollama pull qwen2.5-coder:7b
 
-# Start Ollama server
-ollama serve
+# 4. Generate demo data
+python create_demo_scenario.py
 ```
 
-### 4. Generate Test Data
+## Usage
 
 ```bash
-# Create test scenarios with 4 slow query patterns
-python3 simulate_load.py
+source venv/bin/activate
+
+# Example queries
+python src/main_agentic.py "how many collections do I have"
+python src/main_agentic.py "my database is slow"
+python src/main_agentic.py "check slow queries"
 ```
 
-## 🎯 Usage Examples
+**Supported Query Types:**
+- **Metadata**: "how many collections", "show database info"
+- **Performance**: "database is slow", "check slow queries" 
+- **General**: "hello", "what's your name"
 
-### Basic Performance Investigation
-```bash
-# Comprehensive investigation with prioritized recommendations
-python src/main.py "my database is slow"
-```
+## Configuration
 
-### Query-Focused Analysis
-```bash
-# Shows detailed query information
-python src/main.py "find the top 3 slow queries"
-python src/main.py "check slow queries"
-```
-
-### Index-Specific Analysis
-```bash
-# Focus on index optimization opportunities
-python src/main.py "check my indexes"
-```
-
-### Sample Output
-```
-🔍 SLOW QUERY INVESTIGATION COMPLETE
-
-Found 3 slow queries in database 'testdb'
-
-Issue #1 [CRITICAL] — Full Collection Scan
-  Query: db.users.find({email: "user@example.com"})
-  Problem: COLLSCAN — examined 50,000 docs, returned 1
-  Fix: db.users.createIndex({email: 1})
-
-Issue #2 [HIGH] — $where Disables Index
-  Query: db.users.find({$where: "this.status == 'active'"})
-  Problem: JavaScript execution, index ignored
-  Fix: db.users.find({status: "active"})
-
-Issue #3 [MEDIUM] — Inefficient Regex
-  Query: db.products.find({name: {$regex: "widget"}})
-  Problem: Unanchored regex causes full scan
-  Fix: db.products.find({name: {$regex: "^widget"}})
-
-🎯 Investigation completed in 1.3 seconds
-💡 3 specific optimizations identified
-```
-
-## 📁 Project Structure
-
-```
-mongo-dba-agent/
-├── src/
-│   ├── agent/
-│   │   ├── slow_query_agent.py      # Main LangGraph agent
-│   │   └── state.py                 # Agent state definitions
-│   ├── tools/
-│   │   ├── slow_query_fetcher.py    # MongoDB profiler analysis
-│   │   ├── query_explainer.py       # Query execution analysis
-│   │   ├── index_checker.py         # Index optimization analysis
-│   │   └── recommendation_generator.py  # Actionable recommendations
-│   ├── models/
-│   │   └── query_models.py          # Data models
-│   ├── utils/
-│   │   ├── mongodb_client.py        # MongoDB connection management
-│   │   ├── config_loader.py         # Configuration management
-│   │   └── test_data_generator.py   # Test data creation
-│   └── main.py                      # CLI entry point
-├── config/
-│   └── agent_config.yaml           # Configuration file
-├── requirements.txt
-└── README.md
-```
-
-## ⚙️ Configuration
-
-Edit `config/agent_config.yaml`:
-
+`config/agent_config.yaml`:
 ```yaml
 mongodb:
-  agent_store: "mongodb://localhost:27017"
-  monitored_cluster: "mongodb://localhost:27018"
+  agent_store: "mongodb://localhost:27017"     # Memory storage
+  monitored_cluster: "mongodb://localhost:27018" # Target database
   
 ollama:
   base_url: "http://localhost:11434"
   model: "qwen2.5-coder:7b"
   
 agent:
-  slow_query_threshold_ms: 100
+  slow_query_threshold_ms: 5
   max_queries_to_analyze: 10
-  investigation_timeout: 60
 ```
 
+## Project Structure
 
-### 🚀 Next Steps for Production
-1. **Enterprise Integration**: MongoDB Ops Manager / Atlas connectivity
-2. **Multi-Database Support**: Analyze multiple clusters simultaneously  
-3. **Advanced Models**: Integration with GPT-4o for complex scenarios
-4. **Security Enhancement**: Enterprise authentication and audit logging
-5. **Human-in-the-loop**: Approval workflow for index creation and schema changes
+```
+src/
+├── agent/
+│   └── intelligent_agentic_agent.py  # Core AI agent
+├── memory/
+│   └── agent_memory.py              # MongoDB memory system
+├── tools/
+│   ├── slow_query_fetcher.py        # Profiler analysis
+│   ├── query_explainer.py           # Query explain() analysis
+│   ├── index_checker.py             # Index optimization
+│   └── metadata_inspector.py        # Database metadata
+├── utils/
+│   ├── mongodb_client.py            # Database connections
+│   └── config_loader.py             # Configuration management
+└── main_agentic.py                  # CLI entry point
+```
 
-**POC Status**: 🔬 **In Progress** - MVP scope: slow query investigation
+## Capabilities
 
-## 📝 License
+**Intelligence Features:**
+- Natural language understanding and intent classification
+- Dynamic tool selection based on LLM reasoning
+- Memory-aware recommendations from past investigations
+- Persistent learning with MongoDB-based storage
 
-MIT License - see LICENSE file for details.
+**Analysis Tools:**
+- Slow query detection from MongoDB profiler
+- Query explain() analysis and optimization
+- Index coverage analysis and recommendations 
+- Database metadata and schema information
+
+**Memory System:**
+- Investigation history (30-day TTL)
+- Performance issue tracking (90-day TTL)
+- Recurring problem detection and context building
+
+## Current Scope
+
+**Designed For:**
+- Local development and testing
+- MongoDB Community Edition analysis
+- Educational and proof-of-concept use
+
+**Extensible To:**
+- Multiple database clusters
+- Remote LLM providers (GPT, Claude)
+- MongoDB Enterprise and Atlas integration
+- Web dashboard and automated monitoring
+
+## Technical Foundation
+
+- **Local-First**: No external API dependencies
+- **LLM-Driven**: Semantic reasoning vs hardcoded rules
+- **Memory-Enhanced**: Learns from past investigations
+- **Modular Design**: Extensible tool and memory architecture
+
+Proof-of-concept demonstrating agentic AI for database operations with persistent learning capabilities.
+
+## Contributing
+
+See [architecture documentation](architecture_diagram.md) for system design details.
+
+## License
+
+MIT License
 

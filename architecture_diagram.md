@@ -1,87 +1,125 @@
-# MongoDB DBA AI Agent - Architecture Diagram
+# MongoDB DBA Agent — Architecture Documentation
 
-## High-Level System Architecture
+## System Overview
+
+Memory-enhanced agentic AI system for MongoDB database administration with intelligent reasoning capabilities.
+
+## High-Level Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                           User Interface Layer                         │
+│                          User Interface Layer                          │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │  👤 DBA/Engineer                                                        │
 │      │                                                                  │
-│      │ "Why is my database slow?"                                       │
+│      │ "my database is slow" / "check slow queries"                     │
 │      │                                                                  │
 │      ▼                                                                  │
-│  ┌─────────────────┐                                                    │
-│  │   CLI Interface │                                                    │
-│  │  (src/main.py)  │                                                    │
-│  └─────────────────┘                                                    │
+│  ┌───────────────────────────────────────────────────────────────────┐   │
+│  │                    CLI Interface                                │   │
+│  │                 main_agentic.py                                │   │
+│  │                                                                 │   │
+│  │  • Rich console output                                          │   │
+│  │  • Command-line argument parsing                                │   │
+│  │  • Prerequisites checking                                       │   │
+│  └───────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
-                       │
-                       ▼
+                                   │
+                                   ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                        AI Agent Orchestration Layer                    │
+│                      AI Agent Intelligence Layer                       │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                   LangGraph Agent Orchestrator                 │   │
-│  │                  (src/agent/slow_query_agent.py)               │   │
+│  ┌───────────────────────────────────────────────────────────────────┐   │
+│  │              IntelligentAgenticDBAAgent                        │   │
+│  │           (intelligent_agentic_agent.py)                       │   │
 │  │                                                                 │   │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────┐ │   │
-│  │  │ User Query  │─▶│ Investigation│─▶│ Tool        │─▶│ Report  │ │   │
-│  │  │ Analysis    │  │ Planning     │  │ Execution   │  │ Generation│ │   │
+│  │  │   Intent    │─▶│   Memory    │─▶│    Tool     │─▶│Response │ │   │
+│  │  │ Analysis    │  │  Context    │  │ Selection   │  │Synthesis│ │   │
+│  │  │   (LLM)     │  │  Lookup     │  │   (LLM)     │  │  (LLM)  │ │   │
 │  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────┘ │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
+│  └───────────────────────────────────────────────────────────────────┘   │
 │                                │                                        │
 │                                ▼                                        │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                    Local LLM (Ollama)                          │   │
+│  ┌───────────────────────────────────────────────────────────────────┐   │
+│  │                     QWEN LLM Engine                            │   │
 │  │                   qwen2.5-coder:7b                             │   │
-│  │                 (localhost:11434)                              │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
+│  │                  (Ollama: localhost:11434)                     │   │
+│  └───────────────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────────────┘
-                       │
-                       ▼
+                                   │
+                                   ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                      Specialized Analysis Tools Layer                  │
+│                       Database Analysis Tools Layer                    │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐  ┌─────────┐│
-│  │ SlowQueryFetcher│  │ QueryExplainer │  │ IndexChecker   │  │ Recommendation│
-│  │                │  │                │  │                │  │ Generator │
-│  │ • Time-anchored│  │ • explain()    │  │ • Index coverage│  │ • Specific│
-│  │   queries      │  │   analysis     │  │   analysis     │  │   commands│
-│  │ • Deduplication│  │ • Performance  │  │ • ESR rules    │  │ • Priority│
-│  │ • Pattern      │  │   metrics      │  │ • Missing      │  │   classification│
-│  │   grouping     │  │ • Stage        │  │   indexes      │  │ • Impact  │
-│  │                │  │   identification│  │                │  │   prediction│
+│  │SlowQueryFetcher│  │ QueryExplainer │  │ IndexChecker   │  │Metadata ││
+│  │    (Tool)      │  │     (Tool)     │  │     (Tool)     │  │Inspector││
+│  │                │  │                │  │                │  │ (Tool)  ││
+│  │• Profiler data │  │• explain() API │  │• Index coverage│  │• Schema ││
+│  │• Time windows  │  │• Performance   │  │• ESR analysis  │  │• Collections│
+│  │• Deduplication │  │• Execution     │  │• Missing       │  │• Database││
+│  │• Pattern match │  │  statistics    │  │  opportunities │  │  metadata││
+│  │                │  │• Stage analysis│  │                │  │         ││
 │  └────────────────┘  └────────────────┘  └────────────────┘  └─────────┘│
 │         │                     │                     │               │  │
-│         │                     │                     │               │  │
-│         ▼                     ▼                     ▼               ▼  │
+│         └─────────────────────┼─────────────────────┼───────────────┘  │
+│                               ▼                     ▼                  │
 └─────────────────────────────────────────────────────────────────────────┘
-                       │
-                       ▼
+                                   │
+                                   ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                          Data Sources Layer                            │
+│                            Data Storage Layer                          │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  ┌─────────────────────┐              ┌─────────────────────┐          │
-│  │   Agent Storage     │              │  Monitored Cluster  │          │
-│  │  MongoDB (rs0)      │              │  MongoDB (rs1)      │          │
-│  │  localhost:27017    │              │  localhost:27018    │          │
-│  │                     │              │                     │          │
-│  │ • Agent state       │              │ • system.profile    │          │
-│  │ • Investigation     │              │ • Slow queries      │          │
-│  │   history           │              │ • Performance data  │          │
-│  │ • Configuration     │              │ • Index information │          │
-│  └─────────────────────┘              └─────────────────────┘          │
+│  ┌───────────────────────────────────────┐  ┌─────────────────────────────┐│
+│  │        Agent Memory Store           │  │     Monitored Cluster       ││
+│  │      MongoDB (localhost:27017)     │  │   MongoDB (localhost:27018) ││
+│  │                                     │  │                             ││
+│  │  ┌─────────────────────────────────┐   │  │  ┌─────────────────────────┐ ││
+│  │  │ agent_memory database       │   │  │  │    testdb database      │ ││
+│  │  │                             │   │  │  │                         │ ││
+│  │  │ • investigations (TTL:30d)  │   │  │  │ • users (50k docs)      │ ││
+│  │  │ • performance_issues (90d)  │   │  │  │ • products (5k docs)    │ ││
+│  │  │ • user_context              │   │  │  │ • system.profile        │ ││
+│  │  │                             │   │  │  │                         │ ││
+│  │  └─────────────────────────────────┘   │  │  └─────────────────────────┘ ││
+│  └───────────────────────────────────────┘  └─────────────────────────────┘│
+│                    ▲                                      ▲              │
+│                    │                                      │              │
+│                    └────── Memory Feedback Loop ──────────┘              │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Detailed Component Architecture
+## Agentic Intelligence Components
 
-### Agent Workflow Data Flow
+### Intent Classification
+The agent analyzes natural language input to determine investigation strategy:
+
+- **DIRECT_ANSWER**: General questions ("what's your name")
+- **DATABASE_METADATA**: Information requests ("how many collections")  
+- **PERFORMANCE_ANALYSIS**: Performance issues ("database is slow")
+
+### Memory System
+MongoDB-based persistent learning across investigations:
+
+```
+agent_memory (localhost:27017)
+├── investigations        # Complete investigation records (TTL: 30 days)
+├── performance_issues    # Recurring slow query tracking (TTL: 90 days)  
+└── user_context         # User preferences and patterns
+```
+
+### Dynamic Tool Selection
+LLM reasons about which tools are needed based on:
+- User intent classification
+- Historical context from memory
+- Question complexity analysis
+
+## Investigation Workflow
 
 ```
                     User Query
@@ -89,171 +127,155 @@
                         ▼
     ┌─────────────────────────────────────────────────────────┐
     │               Intent Analysis                           │
-    │  • Parse user request                                   │
-    │  • Determine investigation strategy                     │
-    │  • Set query parameters                                 │
+    │  • Classify request type (LLM)                          │
+    │  • Parse natural language intent                        │
+    │  • Determine investigation scope                        │
     └─────────────────────────────────────────────────────────┘
                         │
                         ▼
     ┌─────────────────────────────────────────────────────────┐
-    │             Slow Query Fetching                         │
-    │  • Connect to monitored cluster profiler               │
-    │  • Apply time-anchored window                           │
-    │  • Fetch queries above threshold (5ms)                 │
-    │  • Deduplicate similar patterns                         │
+    │             Memory Context Lookup                       │
+    │  • Retrieve recent investigations                       │
+    │  • Find recurring performance issues                    │
+    │  • Build contextual background                          │
     └─────────────────────────────────────────────────────────┘
                         │
                         ▼
     ┌─────────────────────────────────────────────────────────┐
-    │              Query Explanation                          │
-    │  • Run explain() on each slow query                    │
-    │  • Extract execution statistics                         │
-    │  • Identify scan types (COLLSCAN vs IXSCAN)            │
-    │  • Calculate efficiency metrics                         │
+    │              Tool Selection & Execution                 │
+    │  • Choose appropriate analysis tools (LLM)              │
+    │  • Execute selected tools with parameters               │
+    │  • Collect and process results                          │
     └─────────────────────────────────────────────────────────┘
                         │
                         ▼
     ┌─────────────────────────────────────────────────────────┐
-    │              Index Analysis                             │
-    │  • Check existing index coverage                        │
-    │  • Apply ESR optimization rules                         │
-    │  • Suggest missing indexes                              │
-    │  • Detect anti-patterns                                 │
-    └─────────────────────────────────────────────────────────┘
-                        │
-                        ▼
-    ┌─────────────────────────────────────────────────────────┐
-    │           Recommendation Generation                     │
-    │  • Create specific MongoDB commands                     │
-    │  • Classify priority levels                             │
-    │  • Predict performance improvements                     │
-    │  • Format human-readable output                         │
+    │           Response Generation & Memory Storage          │
+    │  • Synthesize findings with context (LLM)               │
+    │  • Generate memory-aware recommendations                │
+    │  • Store investigation for future reference             │
     └─────────────────────────────────────────────────────────┘
                         │
                         ▼
                    Final Report
 ```
 
-## Tool Integration Architecture
+## Tool Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    LangGraph Tool Registry                     │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌──────────────────┐    ┌──────────────────┐                  │
-│  │  Tool Protocol   │    │  Tool Registry   │                  │
-│  │  Interface       │◄──►│  Manager         │                  │
-│  └──────────────────┘    └──────────────────┘                  │
-│            │                       │                           │
-│            ▼                       ▼                           │
-│  ┌──────────────────┐    ┌──────────────────┐                  │
-│  │ SlowQueryFetcher │    │ QueryExplainer   │                  │
-│  │ Tool             │    │ Tool             │                  │
-│  └──────────────────┘    └──────────────────┘                  │
-│            │                       │                           │
-│            ▼                       ▼                           │
-│  ┌──────────────────┐    ┌──────────────────┐                  │
-│  │ IndexChecker     │    │ Recommendation   │                  │
-│  │ Tool             │    │ Generator Tool   │                  │
-│  └──────────────────┘    └──────────────────┘                  │
-└─────────────────────────────────────────────────────────────────┘
+### SlowQueryFetcher Tool
+```python
+# Analyzes MongoDB profiler data
+• Connects to monitored cluster profiler
+• Applies configurable time windows  
+• Deduplicates similar query patterns
+• Returns structured slow query data
 ```
 
-## Technology Stack Layers
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Application Layer                          │
-│  • Python 3.11+                                                │
-│  • Rich CLI for formatting                                     │
-│  • Pydantic for data validation                                │
-└─────────────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────────┐
-│                       AI/LLM Layer                             │
-│  • LangGraph (workflow orchestration)                          │
-│  • LangChain Core (tool integration)                           │
-│  • Ollama (local LLM serving)                                  │
-│  • qwen2.5-coder:7b (specialized code model)                   │
-└─────────────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────────┐
-│                      Database Layer                            │
-│  • PyMongo (MongoDB driver)                                    │
-│  • MongoDB 8.0.4 (database engine)                             │
-│  • Replica Sets (rs0, rs1)                                     │
-│  • Profiler Collection (system.profile)                        │
-└─────────────────────────────────────────────────────────────────┘
-┌─────────────────────────────────────────────────────────────────┐
-│                    Infrastructure Layer                        │
-│  • Local development environment                               │
-│  • Docker containers (future)                                  │
-│  • Kubernetes deployment (production)                          │
-└─────────────────────────────────────────────────────────────────┘
+### QueryExplainer Tool  
+```python
+# Runs explain() analysis on queries
+• Executes db.collection.explain() 
+• Extracts execution statistics
+• Identifies scan types and efficiency
+• Analyzes query execution stages
 ```
 
-## Security and Data Flow
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      Security Boundaries                       │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │              Local Environment                          │   │
-│  │                                                         │   │
-│  │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐ │   │
-│  │  │    User     │    │ AI Agent    │    │ Local LLM   │ │   │
-│  │  │  Terminal   │◄──►│ Process     │◄──►│ (Ollama)    │ │   │
-│  │  └─────────────┘    └─────────────┘    └─────────────┘ │   │
-│  │                             │                           │   │
-│  │                             ▼                           │   │
-│  │  ┌─────────────┐    ┌─────────────┐                    │   │
-│  │  │  MongoDB    │    │  MongoDB    │                    │   │
-│  │  │ Agent Store │    │ Monitored   │                    │   │
-│  │  │ (rs0:27017) │    │ (rs1:27018) │                    │   │
-│  │  └─────────────┘    └─────────────┘                    │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│                                                                 │
-│  • No external API calls                                       │
-│  • All data processing local                                   │
-│  • Client data never leaves environment                        │
-│  • Encrypted inter-service communication                       │
-└─────────────────────────────────────────────────────────────────┘
+### IndexChecker Tool
+```python
+# Analyzes index coverage and optimization
+• Compares queries against existing indexes
+• Applies ESR (Equality, Sort, Range) rules
+• Suggests missing index opportunities  
+• Detects index anti-patterns
 ```
 
-## Future Production Architecture
+### MetadataInspector Tool
+```python
+# Provides database and collection information
+• Retrieves collection statistics
+• Analyzes schema patterns
+• Reports database metadata
+• Supports information queries
+```
 
+## Memory Enhancement Features
+
+### Persistent Learning
+- **Investigation History**: Tracks all past investigations with TTL expiration
+- **Pattern Recognition**: Identifies recurring performance issues
+- **Context Building**: Uses historical data to inform new investigations
+
+### Intelligent Recommendations  
+- **Memory-Aware Responses**: References past investigations in recommendations
+- **Recurring Issue Detection**: Highlights problems seen before
+- **Learning Over Time**: Provides increasingly intelligent suggestions
+
+## Technology Stack
+
+### Core Technologies
+- **Python 3.11+**: Application runtime
+- **LangChain-Ollama**: LLM integration  
+- **PyMongo**: MongoDB driver
+- **QWEN 2.5-coder:7b**: Local LLM for reasoning
+- **Rich**: Console output formatting
+
+### Infrastructure
+- **MongoDB 8.0+**: Dual-instance setup (memory + monitored)
+- **Ollama**: Local LLM serving
+- **YAML Configuration**: Flexible system configuration
+
+## Security & Data Flow
+
+### Local-First Design
+- **No External APIs**: All processing happens locally
+- **Encrypted Storage**: MongoDB connections use local security
+- **Data Isolation**: Memory and monitored databases separated  
+- **No Cloud Dependencies**: Complete local operation
+
+### Data Flow Security
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                      Enterprise Deployment                     │
-├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌─────────────────┐    ┌─────────────────┐                    │
-│  │   Web Portal    │    │   API Gateway   │                    │
-│  │   Dashboard     │◄──►│   Load Balancer │                    │
-│  └─────────────────┘    └─────────────────┘                    │
-│                                   │                            │
-│                                   ▼                            │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │             Kubernetes Cluster                         │   │
-│  │                                                         │   │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │   │
-│  │  │ Agent Pod 1 │  │ Agent Pod 2 │  │ Agent Pod N │    │   │
-│  │  │             │  │             │  │             │    │   │
-│  │  │ • LangGraph │  │ • LangGraph │  │ • LangGraph │    │   │
-│  │  │ • Local LLM │  │ • Cloud LLM │  │ • Custom LLM│    │   │
-│  │  │ • Tools     │  │ • Tools     │  │ • Tools     │    │   │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘    │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│                                   │                            │
-│                                   ▼                            │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │               MongoDB Atlas / Ops Manager               │   │
-│  │                                                         │   │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │   │
-│  │  │ Cluster A   │  │ Cluster B   │  │ Cluster C   │    │   │
-│  │  │ Production  │  │ Staging     │  │ Development │    │   │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘    │   │
-│  └─────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+User Input → Local LLM → Local Tools → Local MongoDB → Local Response
+     ▲                                                        │
+     └─────────────── No external data transmission ──────────┘
 ```
+
+## Configuration
+
+### System Configuration
+```yaml
+mongodb:
+  agent_store: "mongodb://localhost:27017"
+  monitored_cluster: "mongodb://localhost:27018"
+  
+ollama:
+  base_url: "http://localhost:11434"
+  model: "qwen2.5-coder:7b"
+  
+agent:
+  slow_query_threshold_ms: 5
+  max_queries_to_analyze: 10
+```
+
+### Memory Settings
+```yaml
+memory:
+  investigation_ttl_days: 30
+  performance_issue_ttl_days: 90
+  max_context_investigations: 5
+```
+
+## Production Considerations
+
+### Scalability Extensions
+- **Multi-Database Support**: Extend to multiple monitored clusters
+- **Remote LLM Integration**: Add cloud LLM options (GPT, Claude)
+- **MongoDB Enterprise**: Integrate with Ops Manager and Atlas
+- **Web Interface**: Replace CLI with web dashboard
+
+### Enterprise Features
+- **Role-Based Access**: Authentication and authorization
+- **Audit Logging**: Track all agent investigations  
+- **Alert Integration**: Connect to monitoring systems
+- **Batch Processing**: Scheduled performance analysis
+
+Foundation architecture for memory-enhanced AI assistants that improve database operations over time.

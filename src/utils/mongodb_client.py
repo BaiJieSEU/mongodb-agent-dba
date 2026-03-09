@@ -95,6 +95,22 @@ class MongoDBManager:
         
         return results
     
+    def test_agent_store_connection(self):
+        """Test agent store connection"""
+        try:
+            self.agent_store.admin.command('ping')
+            return True
+        except Exception as e:
+            raise ConnectionFailure(f"Agent store connection failed: {e}")
+    
+    def test_monitored_cluster_connection(self):
+        """Test monitored cluster connection"""
+        try:
+            self.monitored_cluster.admin.command('ping')
+            return True
+        except Exception as e:
+            raise ConnectionFailure(f"Monitored cluster connection failed: {e}")
+    
     def close_connections(self):
         """Close all MongoDB connections"""
         if self._agent_store_client:
@@ -106,6 +122,10 @@ class MongoDBManager:
             self._monitored_client = None
         
         logger.info("All MongoDB connections closed")
+    
+    def close_all_connections(self):
+        """Alias for close_connections"""
+        self.close_connections()
 
     @contextmanager
     def get_monitored_db(self, db_name: str):
