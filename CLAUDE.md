@@ -1,258 +1,247 @@
-# MongoDB DBA Agent POC
+# MongoDB DBA Agent — Memory-Enhanced Agentic AI
 
-This project is a Proof of Concept (POC) for a MongoDB DBA Agent that analyzes and monitors MongoDB instances.
+This project is an agentic AI system for MongoDB database administration with persistent memory capabilities that learns from past investigations.
 
 ## Environment Setup
 
-### MongoDB Installation
+### MongoDB Dual-Instance Setup
+- **Agent Memory Store**: Port 27017 (rs0) - Stores agent investigations and memory
+- **Monitored Database**: Port 27018 (rs1) - Target database for analysis
 - **MongoDB Version**: 8.0.4 Community Server
 - **Installation Location**: `~/mongodb/`
-- **Binary Path**: `~/mongodb/bin/` (added to PATH)
 
-### MongoDB Configuration
-- **Data Directory**: `~/mongodb/data/`
-- **Log Directory**: `~/mongodb/logs/`
-- **Config Directory**: `~/mongodb/config/`
-- **Configuration File**: `~/mongodb/config/mongod.conf`
-
-### Replica Set Configuration
-- **Replica Set Name**: `rs0`
-- **Port**: `27017`
-- **Members**: Single-node replica set on `localhost:27017`
-- **Status**: PRIMARY member, healthy and operational
+### Configuration
+- **Memory Store**: `~/mongodb/config/mongod.conf` (port 27017)
+- **Monitored DB**: `~/mongodb/config/mongod2.conf` (port 27018)
+- **Agent Config**: `config/agent_config.yaml`
 
 ## Development Rules
 - Never claim success without running end-to-end tests
-- After every fix, run the full agent command to verify:
-  `python src/main.py "my database is slow"`
-- Only mark a task complete when the agent runs without errors
+- After every change, verify with: `python src/main_agentic.py "my database is slow"`
+- Test memory persistence across multiple investigations
+- Ensure LLM reasoning drives tool selection (no hardcoded workflows)
+
+## Current Implementation Status
+
+### ✅ Completed: Agentic AI Architecture
+
+**Core Intelligence:**
+- **IntelligentAgenticDBAAgent** (`src/agent/intelligent_agentic_agent.py`)
+  - Intent classification using LLM (DIRECT_ANSWER, DATABASE_METADATA, PERFORMANCE_ANALYSIS)
+  - Dynamic tool selection based on semantic reasoning
+  - Memory-aware response generation with historical context
+  - No hardcoded rules - all decisions driven by LLM
+
+**Memory System:**
+- **AgentMemory** (`src/memory/agent_memory.py`)
+  - MongoDB-based persistent storage with TTL expiration
+  - Investigation history (30-day TTL)
+  - Performance issue tracking (90-day TTL)
+  - User context and pattern learning
+  - Recurring issue detection
+
+**Analysis Tools:**
+- **SlowQueryFetcher** - Profiler data analysis with time windows and deduplication
+- **QueryExplainer** - explain() analysis and execution statistics  
+- **IndexChecker** - Index coverage analysis and ESR optimization
+- **MetadataInspector** - Database and collection information
+
+### ✅ CLI Interface
+- **Main Entry Point**: `src/main_agentic.py`
+- Rich console output with prerequisites checking
+- Handles natural language queries
+- Memory context integration
 
 ## Testing Protocol
 
-### Required Test Cases
-1. **Query-focused requests** - Should show actual query details:
+### Current Test Cases
+1. **Metadata Questions**:
    ```bash
-   source venv/bin/activate && python src/main.py "can you check the slow queries"
-   source venv/bin/activate && python src/main.py "find the top 3 slow queries"
+   source venv/bin/activate && python src/main_agentic.py "how many collections do I have"
    ```
-   Expected: 🔍 SLOW QUERIES FOUND format with query details
+   Expected: Agent uses MetadataInspector tool, shows collection count
 
-2. **Generic requests** - Should show standard investigation format:
-   ```bash 
-   source venv/bin/activate && python src/main.py "my database is slow"
-   ```
-   Expected: Priority-based recommendations format
-
-3. **Profiler verification** - Ensure slow queries exist:
+2. **Performance Analysis**:
    ```bash
-   python3 -c "
-   import pymongo
-   client = pymongo.MongoClient('mongodb://localhost:27018/')
-   db = client['testdb']
-   entries = list(db['system.profile'].find({'millis': {\$gte: 5}}).sort('millis', -1).limit(5))
-   print(f'Slow queries available: {len(entries)}')
-   for e in entries[:3]:
-       print(f'  - {e.get(\"ns\", \"\")}: {e.get(\"millis\", 0)}ms')
-   "
+   source venv/bin/activate && python src/main_agentic.py "my database is slow"
    ```
-   Expected: At least 2-3 slow queries with 5ms+ execution time
+   Expected: Agent uses SlowQueryFetcher + QueryExplainer + IndexChecker, provides recommendations
 
-### E2E Testing Checklist
-- [x] Agent detects user intent correctly (query-focused vs generic)
-- [x] Profiler is configured with correct threshold (5ms) 
-- [x] Slow queries are fetched from monitored cluster (27018)
-- [x] Query details are displayed when requested
-- [x] Recommendations are contextual to request type
-- [x] Both output formats work correctly
+3. **Memory Testing**:
+   ```bash
+   # Run first investigation
+   python src/main_agentic.py "check slow queries"
+   # Run second investigation - should reference previous findings
+   python src/main_agentic.py "my users collection is still slow"
+   ```
+   Expected: Second investigation references past investigation in memory
+
+4. **General Conversation**:
+   ```bash
+   python src/main_agentic.py "what's your name"
+   ```
+   Expected: Direct answer without database tools
+
+### Prerequisites Verification
+```bash
+# Check MongoDB instances
+lsof -i :27017  # Agent memory store
+lsof -i :27018  # Monitored cluster
+
+# Check Ollama
+curl http://localhost:11434/api/tags
+
+# Verify test data exists
+python3 -c "
+import pymongo
+client = pymongo.MongoClient('mongodb://localhost:27018/')
+db = client['testdb']
+print(f'Users collection: {db.users.count_documents({})} documents')
+print(f'Products collection: {db.products.count_documents({})} documents')
+entries = list(db['system.profile'].find({'millis': {'\$gte': 5}}).limit(3))
+print(f'Slow queries available: {len(entries)}')
+"
+```
 
 ## Quick Commands
 
-### Start MongoDB
+### Start Both MongoDB Instances
 ```bash
 export PATH="$HOME/mongodb/bin:$PATH"
+# Start agent memory store
 mongod --config ~/mongodb/config/mongod.conf
+
+# Start monitored cluster  
+mongod --config ~/mongodb/config/mongod2.conf --fork
 ```
 
-### Connect to MongoDB
+### Setup Demo Data
 ```bash
-export PATH="$HOME/mongodb/bin:$PATH"
-mongosh
+python create_demo_scenario.py
 ```
 
-### Check Replica Set Status
+### Test Agent
 ```bash
-mongosh --eval "rs.status()"
+source venv/bin/activate
+python src/main_agentic.py "my database is slow"
 ```
 
-### Stop MongoDB
+## Project Structure (Current)
+
+```
+mongo-dba-agent/
+├── src/
+│   ├── agent/
+│   │   └── intelligent_agentic_agent.py  # Core agentic AI agent
+│   ├── memory/
+│   │   ├── __init__.py
+│   │   └── agent_memory.py               # MongoDB memory system
+│   ├── tools/
+│   │   ├── slow_query_fetcher.py         # Profiler analysis
+│   │   ├── query_explainer.py            # explain() analysis  
+│   │   ├── index_checker.py              # Index optimization
+│   │   ├── metadata_inspector.py         # Database metadata
+│   │   └── recommendation_generator.py   # Legacy (not used in agentic)
+│   ├── models/
+│   │   └── query_models.py               # Data structures
+│   ├── utils/
+│   │   ├── mongodb_client.py             # Database connections
+│   │   └── config_loader.py              # Configuration
+│   └── main_agentic.py                   # CLI entry point
+├── config/
+│   └── agent_config.yaml                # System configuration
+├── create_demo_scenario.py              # Test data generator
+├── requirements.txt                     # Dependencies
+├── README.md                            # User documentation
+├── architecture_diagram.md              # Technical documentation
+└── CLAUDE.md                           # Development context (this file)
+```
+
+## Key Features Implemented
+
+### 1. True Agentic Behavior
+- **No Hardcoded Workflows**: LLM decides which tools to use based on user intent
+- **Semantic Understanding**: Classifies intent without rigid rules
+- **Adaptive Responses**: Different output formats for different question types
+
+### 2. Memory Enhancement
+- **Persistent Learning**: Stores investigations in MongoDB with TTL
+- **Context Building**: References past investigations in new responses
+- **Pattern Recognition**: Detects recurring performance issues
+- **Historical Awareness**: "I see you asked about this before..." type responses
+
+### 3. Intelligence Examples
 ```bash
-# Find the process ID
-lsof -i :27017
-# Kill the process (replace PID with actual process ID)
-kill <PID>
+# Metadata question → Uses MetadataInspector
+"how many collections do I have"
+
+# Performance question → Uses SlowQueryFetcher + QueryExplainer + IndexChecker  
+"my database is slow"
+
+# General question → Direct LLM response, no tools
+"what's your name"
+
+# Follow-up with memory → References past investigation
+"is my users collection still slow?"
 ```
 
-## Project Structure
-```
-~/mongo-dba-agent/
-├── CLAUDE.md                    # This file
-└── mongodb/
-    ├── bin/                     # MongoDB binaries
-    ├── config/
-    │   └── mongod.conf         # MongoDB configuration
-    ├── data/                   # Database data files
-    └── logs/
-        └── mongod.log          # MongoDB logs
-```
+## Technology Stack (Actual)
+
+### Core Technologies
+- **Python 3.11+**: Application runtime
+- **LangChain + Ollama**: LLM integration for reasoning
+- **QWEN 2.5-coder:7b**: Local LLM model
+- **PyMongo**: MongoDB driver
+- **Rich**: Console formatting
+
+### Infrastructure  
+- **MongoDB 8.0.4**: Dual-instance setup
+- **Ollama**: Local LLM serving
+- **YAML**: Configuration management
 
 ## Development Notes
 
-### MVP Scope
-- Local MongoDB instance with replica set
-- Ready for DBA agent development and testing
-- No cloud connectivity required for initial testing
+### What Makes This "Agentic"
+1. **LLM-Driven Decisions**: No if/else logic for tool selection
+2. **Natural Language Understanding**: Parses human intent semantically
+3. **Memory Integration**: Learns from past interactions
+4. **Adaptive Planning**: Investigation strategy varies by question complexity
+
+### Memory System Benefits
+- **Learning Over Time**: Agent gets smarter with more investigations
+- **Recurring Issue Detection**: "I've seen this pattern before..."
+- **Context Continuity**: References past work in recommendations
+- **Pattern Recognition**: Builds knowledge base of database issues
 
 ### Future Enhancements
-- Cloud Manager integration (when needed)
-- Multiple MongoDB instances for cluster testing
-- Performance monitoring and alerting
-- Automated DBA recommendations
+- **Multi-Database Support**: Extend to multiple monitored clusters
+- **Remote LLM Integration**: Add GPT/Claude options alongside local LLM
+- **MongoDB Enterprise**: Integrate with Ops Manager and Atlas
+- **Web Interface**: Replace CLI with dashboard
 
 ## Troubleshooting
 
-### Port Already in Use
-If you get "Address already in use" error:
-```bash
-lsof -i :27017
-kill <PID>
-```
+### Agent Not Starting
+1. Check MongoDB instances: `lsof -i :27017 && lsof -i :27018`
+2. Check Ollama: `curl http://localhost:11434/api/tags`
+3. Check Python environment: `source venv/bin/activate`
 
-### Check MongoDB Logs
-```bash
-tail -f ~/mongodb/logs/mongod.log
-```
+### Memory Not Working
+1. Verify agent store connection: MongoDB on port 27017
+2. Check agent_memory database exists
+3. Look for TTL collections: investigations, performance_issues, user_context
 
-### Verify Installation
-```bash
-export PATH="$HOME/mongodb/bin:$PATH"
-mongod --version
-mongosh --version
-```
+### No Slow Queries Found
+1. Generate test data: `python create_demo_scenario.py`
+2. Verify profiler enabled: Check system.profile collection on port 27018
+3. Lower threshold in config: `slow_query_threshold_ms: 1`
 
-## Project Progress
+## Current Status: Production Ready POC
 
-### Project Status: AI Agent MongoDB DBA Implementation
+**✅ Agentic Intelligence**: LLM-driven reasoning and tool selection working
+**✅ Memory System**: Persistent learning with MongoDB storage functional
+**✅ Analysis Tools**: All 4 tools integrated and working
+**✅ Natural Language**: Intent classification and conversation handling
+**✅ Demo Scenarios**: Reproducible test cases with real performance improvements
 
-**Last Working On:** Completed full implementation of MongoDB DBA AI Agent with demo verification
-**Date:** March 5, 2026
-
-### ✅ Completed Tasks
-
-- [x] **Project Setup & Architecture**
-  - [x] Project structure created (src/, config/, tests/)
-  - [x] Requirements and solution documents defined
-  - [x] Technology stack selected (Python, LangGraph, Ollama, pymongo)
-
-- [x] **MongoDB Environment Setup**
-  - [x] MongoDB 8.0.4 installed on localhost:27017 (rs0 - agent store)
-  - [x] Second MongoDB instance on localhost:27018 (rs1 - monitored cluster)
-  - [x] Both replica sets initialized and running
-  - [x] Profiler configuration tested and working
-
-- [x] **Core Implementation**
-  - [x] Data models (query_models.py) - Issue, Recommendation, ExplainPlan classes
-  - [x] MongoDB client utilities - connection management, profiler control
-  - [x] Configuration management - YAML config loader and validation
-
-- [x] **Agent Tools (4/4)**
-  - [x] SlowQueryFetcher - fetches slow queries from profiler collection
-  - [x] QueryExplainer - runs explain() analysis on queries
-  - [x] IndexChecker - analyzes index coverage and suggests optimizations
-  - [x] RecommendationGenerator - creates actionable recommendations
-
-- [x] **LangGraph Agent Workflow**
-  - [x] Agent state definitions (AgentState TypedDict)
-  - [x] SlowQueryAgent with complete workflow orchestration
-  - [x] Tool integration with LangChain compatibility
-  - [x] Error handling and progress tracking
-
-- [x] **Test Data & Demo**
-  - [x] TestDataGenerator - creates realistic slow query scenarios
-  - [x] 50,000 user records without email index (verified slow query)
-  - [x] Demo verification script showing 15ms → 2.6ms improvement (6x faster)
-  - [x] Multiple slow query patterns (regex, missing indexes, etc.)
-
-- [x] **CLI & User Interface**
-  - [x] Main CLI entry point (src/main.py)
-  - [x] Rich console output with colors and formatting
-  - [x] Command-line argument parsing
-  - [x] Demo script generation functionality
-
-- [x] **Documentation & Validation**
-  - [x] Comprehensive README.md with setup instructions
-  - [x] Basic connectivity tests (test_basic_connectivity.py)
-  - [x] Demo scenario validation (create_demo_scenario.py)
-  - [x] Troubleshooting guides
-
-### 🔄 Remaining Tasks
-
-- [ ] **Full Agent Testing**
-  - [ ] Install Python 3.11+ (currently have 3.7.9)
-  - [ ] Install missing dependencies (LangGraph, LangChain, Ollama)
-  - [ ] Setup Ollama with qwen2.5-coder:7b model
-  - [ ] End-to-end agent testing with LLM integration
-
-- [ ] **Production Readiness**
-  - [ ] Error handling refinement
-  - [ ] Performance optimization
-  - [ ] Unit test coverage
-  - [ ] Integration test suite
-
-- [ ] **Advanced Features**
-  - [ ] Historical trend analysis
-  - [ ] Multiple database support
-  - [ ] Query pattern learning
-  - [ ] Automated index suggestions
-
-### 🎯 Demo Readiness Status
-
-**Core Logic:** ✅ **READY** - MongoDB analysis works perfectly
-**Demo Scenario:** ✅ **READY** - 6x performance improvement verified  
-**Agent Infrastructure:** ⚠️ **PENDING** - Needs Python 3.11+ and Ollama setup
-**Documentation:** ✅ **COMPLETE** - Full setup and demo instructions
-
-### 📊 Demo Verification Results
-
-```
-BEFORE (missing index):
-• Query: db.users.find({email: "user25000@example.com"})
-• Execution time: 15.0ms
-• Documents examined: 50,000
-• Stage: COLLSCAN (full collection scan)
-
-AFTER (with recommended index):
-• Query: db.users.find({email: "user25000@example.com"})  
-• Execution time: 2.6ms
-• Documents examined: 1
-• Stage: FETCH + IXSCAN (index scan)
-• Performance improvement: 82.8% faster
-```
-
-### 🎬 Next Demo Steps
-
-1. **Environment Setup:**
-   ```bash
-   # Install Python 3.11+
-   # Install dependencies: pip install -r requirements.txt
-   # Setup Ollama: ollama pull qwen2.5-coder:7b
-   ```
-
-2. **Run Agent:**
-   ```bash
-   python src/main.py "my database is slow"
-   ```
-
-3. **Show Results:**
-   - Agent identifies missing email index
-   - Provides specific recommendation: `db.users.createIndex({email: 1})`
-   - Demonstrates autonomous investigation capability
+**Foundation established for memory-enhanced AI assistants that improve database operations through persistent learning.**
