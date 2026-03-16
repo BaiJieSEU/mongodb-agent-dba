@@ -586,10 +586,10 @@ When adding or updating an item, re-insert it in the correct position — do not
 |---|---|---|---|---|---|
 | BL-020 | Structured report format | P0 | S | 3 | ✅ Done |
 | BL-021 | Severity thresholds config | P0 | S | 3 | 🔲 |
-| BL-001 | Server & connection health tool | P0 | M | 1 | 🔲 |
-| BL-002 | Replication health tool | P0 | M | 1 | 🔲 |
-| BL-003 | Collection storage stats tool | P0 | M | 1 | 🔲 |
-| BL-004 | Index usage statistics tool | P0 | M | 1 | 🔲 |
+| BL-001 | Server & connection health tool | P0 | M | 1 | ✅ Done |
+| BL-002 | Replication health tool | P0 | M | 1 | ✅ Done |
+| BL-003 | Collection storage stats tool | P0 | M | 1 | ✅ Done |
+| BL-004 | Index usage statistics tool | P0 | M | 1 | ✅ Done |
 | BL-010 | Health check pipeline | P0 | L | 2 | 🔲 |
 | BL-011 | Configurable scheduler | P0 | L | 2 | 🔲 |
 | BL-030 | Structured tool output (typed) | P0 | L | 4 | 🔲 |
