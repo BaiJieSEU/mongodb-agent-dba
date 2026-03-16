@@ -2,6 +2,8 @@
 
 Updated: 2026-03-16 | Format: Epic → Story → Acceptance criteria
 
+
+
 Priority: **P0** = must-have for health-check goal | **P1** = high value | **P2** = medium | **P3** = nice-to-have
 Size: **S** < 1 day | **M** 1–3 days | **L** 3–7 days | **XL** > 7 days
 
@@ -452,6 +454,129 @@ Advisor recommendations).
 
 ---
 
+## Epic 7 — Report Usability
+
+*Goal: health check output is easy to read and share across any platform or OS*
+
+---
+
+### BL-060 · HTML report output
+**Priority:** P1 | **Size:** M
+
+**Story:** As a DBA, I want each health check to also produce a self-contained HTML
+file so I can open it in any browser, email it, or share it via a file share without
+needing a terminal, Rich, or any Python installed on the recipient's machine.
+
+**Why this matters:**
+The current Rich console output and JSON file are useful for developers but not for
+managers, auditors, or teammates on Windows/macOS who don't have the agent installed.
+An HTML file works everywhere with zero dependencies.
+
+**Acceptance criteria:**
+- `HealthCheckRunner` writes `reports/health_YYYY-MM-DD_HH-MM-SS.html` alongside the JSON
+- HTML is fully self-contained — all CSS inline, no external CDN or font requests
+- Matches the structure of the console report: header, per-section cards, recommendations table
+- Severity colours consistent with console (green / amber / red)
+- Overall severity shown as a banner at the top
+- Renders correctly in Chrome, Firefox, Safari, and Edge
+- File size < 100 KB for a typical 3-section report (no heavy frameworks)
+- `--no-html` CLI flag to suppress HTML output for scripted / scheduled runs
+
+---
+
+### BL-061 · Markdown report output
+**Priority:** P2 | **Size:** S
+
+**Story:** As a DBA, I want a Markdown version of the health check report so I can
+paste it directly into GitHub issues, Confluence, Notion, or a Slack message without
+any formatting conversion.
+
+**Acceptance criteria:**
+- `HealthCheckRunner` writes `reports/health_YYYY-MM-DD_HH-MM-SS.md` alongside JSON and HTML
+- Uses standard CommonMark — no GitHub-specific extensions required
+- Sections rendered as `##` headings with a severity emoji prefix (✅ ⚠️ ❌)
+- Signals rendered as a Markdown table
+- Recommendations rendered as a numbered list with bold action line
+- `--no-markdown` CLI flag to suppress
+
+---
+
+## Epic 8 — Deployment & Distribution
+
+*Goal: a customer can go from zero to a running agent in under 30 minutes on any
+machine, without needing to understand Python packaging, MongoDB configuration, or
+Ollama internals*
+
+---
+
+### BL-070 · Docker Compose deployment
+**Priority:** P1 | **Size:** L
+
+**Story:** As a customer, I want to run `docker compose up` and have the entire agent
+stack (agent, both MongoDB instances, Ollama) start automatically so I don't need to
+install or configure anything manually.
+
+**Why this matters:**
+The current setup requires: Python 3.10+, venv, pip, Node 18+, npm, two manually
+configured mongod instances, Ollama, and the correct model pulled. That is too many
+steps for a customer to follow reliably. Docker Compose collapses this to one command.
+
+**Acceptance criteria:**
+- `docker-compose.yml` defines four services:
+  - `agent` — Python app image built from `Dockerfile`
+  - `mongo-memory` — MongoDB 8.0, port 27017, agent memory store
+  - `mongo-monitored` — MongoDB 8.0, port 27018, target cluster (pre-loaded with demo data)
+  - `ollama` — Ollama service with `qwen2.5-coder:7b` pulled on first start
+- `Dockerfile` for the agent: Python 3.11-slim base, installs pip deps + Node 18 + MCP server
+- `docker-compose up` reaches a ready state with no manual steps beyond the command
+- Health checks defined for all services so `agent` waits for dependencies
+- `reports/` directory bind-mounted so reports are accessible on the host
+- `config/agent_config.yaml` overridable via `AGENT_CONFIG` env var
+- Works on macOS (Apple Silicon + Intel), Linux (amd64 + arm64), and Windows (WSL2)
+- `README.md` Docker section with exact commands: `docker compose up`, `docker compose exec agent python src/main_agentic.py --health-check`
+
+---
+
+### BL-071 · Environment variable config support
+**Priority:** P1 | **Size:** S
+
+**Story:** As a customer deploying in a CI/CD pipeline or Docker environment, I want
+to configure the agent entirely through environment variables so I don't need to edit
+`agent_config.yaml` or bake secrets into an image.
+
+**Acceptance criteria:**
+- All config values in `agent_config.yaml` have a corresponding `AGENT_*` env var override
+- Key mappings:
+  - `AGENT_MONGO_STORE` → `mongodb.agent_store`
+  - `AGENT_MONGO_CLUSTER` → `mongodb.monitored_cluster`
+  - `AGENT_OLLAMA_URL` → `ollama.base_url`
+  - `AGENT_OLLAMA_MODEL` → `ollama.model`
+  - `AGENT_SLOW_QUERY_MS` → `agent.slow_query_threshold_ms`
+- Env vars take precedence over the YAML file
+- `config_loader.py` applies env overrides after loading YAML
+- No secrets (passwords, API keys) stored in YAML or committed to the repo
+
+---
+
+### BL-072 · One-line setup script for non-Docker environments
+**Priority:** P2 | **Size:** M
+
+**Story:** As a customer without Docker, I want a single setup script that installs
+all dependencies and starts the agent so I can get running without reading a long
+installation guide.
+
+**Acceptance criteria:**
+- `setup.sh` (bash) and `setup.ps1` (PowerShell) cover Linux/macOS and Windows
+- Script checks and installs (or reports missing): Python 3.10+, Node 18+, Ollama,
+  `@mongodb-js/mongodb-mcp-server`, Python venv + pip deps
+- Pulls `qwen2.5-coder:7b` if not already present
+- Starts both MongoDB instances if local MongoDB is available
+- Loads demo data via `create_demo_scenario.py`
+- Ends with a success message and the exact command to run the first health check
+- Idempotent — safe to run twice without breaking an existing installation
+
+---
+
 ## Backlog Summary
 
 Sorted by priority, then size (S → M → L → XL).
@@ -471,20 +596,26 @@ Sorted by priority, then size (S → M → L → XL).
 | BL-006 | Profiler configuration check | P1 | S | 1 | 🔲 |
 | BL-007 | Duplicate/redundant index detection | P1 | S | 1 | 🔲 |
 | BL-023 | Confidence scoring on recommendations | P1 | S | 3 | 🔲 |
+| BL-071 | Environment variable config support | P1 | S | 8 | 🔲 |
 | BL-008 | Aggregation pipeline analysis | P1 | M | 1 | 🔲 |
 | BL-012 | Trend comparison in scheduled runs | P1 | M | 2 | 🔲 |
 | BL-022 | Webhook / notification output | P1 | M | 3 | 🔲 |
 | BL-031 | Automatic tool parameter chaining | P1 | M | 4 | 🔲 |
 | BL-032 | Configurable LLM backend | P1 | M | 4 | 🔲 |
+| BL-060 | HTML report output | P1 | M | 7 | 🔲 |
 | BL-050 | Multi-cluster support | P1 | L | 6 | 🔲 |
+| BL-070 | Docker Compose deployment | P1 | L | 8 | 🔲 |
 | BL-033 | ESR index order validation | P2 | S | 4 | 🔲 |
 | BL-041 | Approval-gated profiler config | P2 | S | 5 | 🔲 |
 | BL-052 | Immutable audit trail | P2 | S | 6 | 🔲 |
+| BL-061 | Markdown report output | P2 | S | 7 | 🔲 |
+| BL-072 | One-line setup script | P2 | M | 8 | 🔲 |
 | BL-040 | Approval-gated index creation | P2 | L | 5 | 🔲 |
 | BL-051 | REST API + Web UI | P2 | XL | 6 | 🔲 |
 | BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
 | BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
 
 **P0:** 9 items (BL-020 ✅ done, 8 remaining) — foundation for the health-check goal
-**P1:** 10 items — high-value once P0 is in place
-**P2–P3:** 7 items — important but not blocking
+**P1:** 14 items — high-value once P0 is in place
+**P2–P3:** 10 items — important but not blocking
+**Total:** 32 items across 8 epics
