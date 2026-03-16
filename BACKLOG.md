@@ -579,7 +579,8 @@ installation guide.
 
 ## Backlog Summary
 
-Sorted by priority, then size (S → M → L → XL).
+**Sort order (always): Priority P0 → P1 → P2 → P3, then Size S → M → L → XL within each priority.**
+When adding or updating an item, re-insert it in the correct position — do not append to the end.
 
 | ID | Title | Priority | Size | Epic | Status |
 |---|---|---|---|---|---|
