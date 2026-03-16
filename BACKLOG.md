@@ -1,6 +1,6 @@
 # MongoDB DBA Agent — Product Backlog
 
-Updated: 2026-03-16 | Format: Epic → Story → Acceptance criteria
+Updated: 2026-03-17 | Format: Epic → Story → Acceptance criteria
 
 Priority: **P0** = must-have for health-check goal | **P1** = high value | **P2** = medium | **P3** = nice-to-have
 Size: **S** < 1 day | **M** 1–3 days | **L** 3–7 days | **XL** > 7 days
@@ -20,37 +20,40 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-003 | Collection storage stats tool | P0 | M | 1 | ✅ Done |
 | BL-004 | Index usage statistics tool | P0 | M | 1 | ✅ Done |
 | BL-021 | Severity thresholds config | P0 | S | 3 | 🔲 |
+| BL-071 | Environment variable + secret config | P0 | S | 8 | 🔲 |
+| BL-032 | LangChain multi-LLM backend | P0 | M | 4 | 🔲 |
 | BL-010 | Health check pipeline | P0 | L | 2 | 🔲 |
 | BL-011 | Configurable scheduler | P0 | L | 2 | 🔲 |
 | BL-030 | Structured tool output (typed) | P0 | L | 4 | 🔲 |
+| BL-070 | Docker Compose deployment | P0 | L | 8 | 🔲 |
 | BL-005 | Current operations tool | P1 | S | 1 | 🔲 |
 | BL-006 | Profiler configuration check | P1 | S | 1 | 🔲 |
 | BL-007 | Duplicate/redundant index detection | P1 | S | 1 | 🔲 |
 | BL-023 | Confidence scoring on recommendations | P1 | S | 3 | 🔲 |
-| BL-071 | Environment variable config support | P1 | S | 8 | 🔲 |
+| BL-074 | PS delivery runbook (< 30 min) | P1 | S | 8 | 🔲 |
 | BL-008 | Aggregation pipeline analysis | P1 | M | 1 | 🔲 |
 | BL-012 | Trend comparison in scheduled runs | P1 | M | 2 | 🔲 |
 | BL-022 | Webhook / notification output | P1 | M | 3 | 🔲 |
 | BL-031 | Automatic tool parameter chaining | P1 | M | 4 | 🔲 |
-| BL-032 | Configurable LLM backend | P1 | M | 4 | 🔲 |
 | BL-060 | HTML report output | P1 | M | 7 | 🔲 |
+| BL-073 | Secret management integration | P1 | M | 8 | 🔲 |
 | BL-050 | Multi-cluster support | P1 | L | 6 | 🔲 |
-| BL-070 | Docker Compose deployment | P1 | L | 8 | 🔲 |
 | BL-033 | ESR index order validation | P2 | S | 4 | 🔲 |
 | BL-041 | Approval-gated profiler config | P2 | S | 5 | 🔲 |
 | BL-052 | Immutable audit trail | P2 | S | 6 | 🔲 |
 | BL-061 | Markdown report output | P2 | S | 7 | 🔲 |
-| BL-072 | One-line setup script | P2 | M | 8 | 🔲 |
+| BL-075 | Data sovereignty mode | P2 | S | 8 | 🔲 |
+| BL-072 | Non-Docker quickstart script | P2 | M | 8 | 🔲 |
 | BL-040 | Approval-gated index creation | P2 | L | 5 | 🔲 |
 | BL-051 | REST API + Web UI | P2 | XL | 6 | 🔲 |
 | BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
 | BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
 
 **Done:** 5 items (BL-020, BL-001, BL-002, BL-003, BL-004)
-**P0:** 4 remaining (BL-021, BL-010, BL-011, BL-030) — foundation for the health-check goal
-**P1:** 14 items — high-value once P0 is in place
-**P2–P3:** 9 items — important but not blocking
-**Total:** 32 items across 8 epics (5 done, 27 remaining)
+**P0:** 7 remaining — foundation for health-check goal + customer deployment
+**P1:** 13 items — high-value once P0 is in place
+**P2–P3:** 10 items — important but not blocking
+**Total:** 35 items across 8 epics (5 done, 30 remaining)
 
 ---
 
@@ -230,6 +233,37 @@ to carry a confidence level and the evidence behind it so I can triage quickly.
 
 ---
 
+### BL-032 · LangChain multi-LLM backend
+**Priority:** P0 | **Size:** M
+
+**Story:** As a PS engineer deploying at a customer site, I want to switch the LLM
+provider with a single config line so the agent works with whatever the customer
+already has — no code changes required.
+
+**Background:**
+Customers fall into four deployment patterns, in priority order:
+1. **Azure OpenAI** — customer already has Azure; data stays in their Azure tenant
+2. **AWS Bedrock (Claude)** — customer on AWS; data stays in their AWS account
+3. **Anthropic API** — customer has no cloud commitment; uses API key
+4. **Local Ollama + Qwen** — strict data sovereignty; data never leaves the premises
+
+LangChain provides a unified interface for all four without changing business logic.
+
+**Acceptance criteria:**
+- `llm.provider` in config: `azure_openai | bedrock | anthropic | ollama`
+- Each provider implemented as a LangChain `BaseChatModel` subclass; agent code
+  calls only the LangChain interface
+- Provider-specific config (endpoint, deployment name, region, model ID) under
+  `llm.azure_openai`, `llm.bedrock`, `llm.anthropic`, `llm.ollama` respectively
+- All credentials read from environment variables — never from the YAML file
+- `classify_intent`, `select_tools`, `generate_response` all work identically
+  across providers
+- Switching provider requires only changing `llm.provider` in config (or
+  `AGENT_LLM_PROVIDER` env var) — zero code changes
+- Prerequisite check (`test_prerequisites`) validates the selected provider on startup
+
+---
+
 ### BL-030 · Structured tool output (typed results)
 **Priority:** P0 | **Size:** L
 
@@ -257,22 +291,6 @@ rather than relying on the LLM to produce the correct parameter on the first pas
 - That collection name is injected as a parameter override into subsequent steps
 - LLM still makes the selection decision; code provides the resolved parameter value
 - Reduces investigation steps from 3 blind calls to 3 targeted calls
-
----
-
-### BL-032 · Configurable LLM backend
-**Priority:** P1 | **Size:** M
-
-**Story:** As a developer, I want to switch between a local Ollama model and a
-remote Claude / GPT model via config so the agent can use a more capable model
-for higher-stakes health check reasoning without changing code.
-
-**Acceptance criteria:**
-- `ollama.provider: ollama | claude | openai` in config
-- Claude backend uses `anthropic` SDK; OpenAI backend uses `openai` SDK
-- All three providers support `classify_intent`, `select_tools`, `generate_response`
-- Model name configurable per provider
-- Fallback to Ollama if remote provider call fails
 
 ---
 
@@ -454,62 +472,137 @@ any formatting conversion.
 
 ## Epic 8 — Deployment & Distribution
 
-*Goal: a customer can go from zero to a running agent in under 30 minutes on any
-machine, without needing to understand Python packaging, MongoDB configuration, or
-Ollama internals*
+*Goal: a PS engineer can deploy the agent at a customer site in under 30 minutes,
+on any machine, regardless of cloud provider or data sovereignty requirement*
 
 ---
 
-### BL-071 · Environment variable config support
-**Priority:** P1 | **Size:** S
+### BL-071 · Environment variable + secret config
+**Priority:** P0 | **Size:** S
 
-**Story:** As a customer deploying in a CI/CD pipeline or Docker environment, I want
-to configure the agent entirely through environment variables so I don't need to edit
-`agent_config.yaml` or bake secrets into an image.
+**Story:** As a PS engineer, I want every sensitive config value to be driven by
+environment variables so no secrets are baked into the image or committed to git,
+and so the same image works across all customer environments.
 
 **Acceptance criteria:**
-- All config values in `agent_config.yaml` have a corresponding `AGENT_*` env var override
-- Key mappings:
-  - `AGENT_MONGO_STORE` → `mongodb.agent_store`
+- All config values have a corresponding `AGENT_*` env var that takes precedence over YAML:
   - `AGENT_MONGO_CLUSTER` → `mongodb.monitored_cluster`
-  - `AGENT_OLLAMA_URL` → `ollama.base_url`
-  - `AGENT_OLLAMA_MODEL` → `ollama.model`
-  - `AGENT_SLOW_QUERY_MS` → `agent.slow_query_threshold_ms`
-- Env vars take precedence over the YAML file
+  - `AGENT_MONGO_STORE` → `mongodb.agent_store`
+  - `AGENT_LLM_PROVIDER` → `llm.provider` (`azure_openai | bedrock | anthropic | ollama`)
+  - `AGENT_AZURE_OPENAI_ENDPOINT`, `AGENT_AZURE_OPENAI_KEY`, `AGENT_AZURE_OPENAI_DEPLOYMENT`
+  - `AGENT_ANTHROPIC_API_KEY`
+  - `AGENT_AWS_REGION`, `AGENT_BEDROCK_MODEL_ID`
+  - `AGENT_OLLAMA_URL`, `AGENT_OLLAMA_MODEL`
+  - `AGENT_SLOW_QUERY_MS`
+- `.env.example` committed to repo with all keys and placeholder values
+- `.env` in `.gitignore` — never committed
 - `config_loader.py` applies env overrides after loading YAML
-- No secrets (passwords, API keys) stored in YAML or committed to the repo
+- No secrets (API keys, passwords, connection strings) written to YAML or hardcoded anywhere
+
+---
+
+### BL-074 · PS delivery runbook (< 30 min)
+**Priority:** P1 | **Size:** S
+
+**Story:** As a PS engineer, I want a step-by-step runbook that takes me from
+zero to a running health check at a customer site in under 30 minutes, covering
+all four LLM deployment patterns.
+
+**Why this matters:**
+The customer only provides two things: a MongoDB connection string and their LLM
+choice. The runbook must handle everything else without requiring Python, Node.js,
+or Ollama knowledge from the customer.
+
+**Acceptance criteria:**
+- `RUNBOOK.md` at repo root: concise numbered steps, no unnecessary prose
+- LLM decision tree at the top: Azure OpenAI → Bedrock → Anthropic API → Ollama
+- Per-provider env var list with exact variable names and where to find values
+- One-command start: `cp .env.example .env && vi .env && docker compose up -d`
+- Smoke test command to verify health check produces output within 2 minutes
+- Troubleshooting section: top 5 failure modes with exact fix steps
+- Estimated time per section: connection config 5 min, LLM config 10 min, verify 5 min
+
+---
+
+### BL-073 · Secret management integration
+**Priority:** P1 | **Size:** M
+
+**Story:** As a PS engineer deploying in a production customer environment, I want
+the agent to fetch secrets from the customer's existing secret store so no
+credentials are stored in `.env` files on disk.
+
+**Providers to support:**
+- AWS Secrets Manager
+- Azure Key Vault
+- HashiCorp Vault
+
+**Acceptance criteria:**
+- `secret_manager.provider: aws | azure | vault | env` in config (default: `env`)
+- `env` provider (current behaviour) reads directly from environment variables
+- `aws` provider: fetches JSON secret by ARN; maps keys to agent config
+- `azure` provider: fetches secrets from Key Vault by name; maps to agent config
+- `vault` provider: fetches from a Vault KV path; maps to agent config
+- Provider credentials themselves come from environment variables (IAM role /
+  workload identity preferred over static keys)
+- Secret fetch happens once at startup; secrets not logged or written to disk
+- `AGENT_SECRET_PROVIDER` env var overrides config file setting
 
 ---
 
 ### BL-070 · Docker Compose deployment
-**Priority:** P1 | **Size:** L
+**Priority:** P0 | **Size:** L
 
-**Story:** As a customer, I want to run `docker compose up` and have the entire agent
-stack (agent, both MongoDB instances, Ollama) start automatically so I don't need to
-install or configure anything manually.
+**Story:** As a PS engineer, I want to run `docker compose up` and have the entire
+agent stack start automatically so a customer deployment requires no manual
+installation of Python, Node.js, Ollama, or MongoDB tooling.
 
 **Why this matters:**
 The current setup requires: Python 3.10+, venv, pip, Node 18+, npm, two manually
 configured mongod instances, Ollama, and the correct model pulled. That is too many
-steps for a customer to follow reliably. Docker Compose collapses this to one command.
+steps for a 30-minute PS engagement. Docker Compose collapses this to one command.
 
 **Acceptance criteria:**
 - `docker-compose.yml` defines four services:
-  - `agent` — Python app image built from `Dockerfile`
+  - `agent` — Python app image; all LLM providers supported via env vars
   - `mongo-memory` — MongoDB 8.0, port 27017, agent memory store
-  - `mongo-monitored` — MongoDB 8.0, port 27018, target cluster (pre-loaded with demo data)
-  - `ollama` — Ollama service with `qwen2.5-coder:7b` pulled on first start
-- `Dockerfile` for the agent: Python 3.11-slim base, installs pip deps + Node 18 + MCP server
-- `docker-compose up` reaches a ready state with no manual steps beyond the command
-- Health checks defined for all services so `agent` waits for dependencies
+  - `mongo-monitored` — MongoDB 8.0, port 27018, for local dev/demo only
+    (production: replaced by customer's `AGENT_MONGO_CLUSTER` env var)
+  - `ollama` — profile `ollama` only; skipped when using cloud LLM providers
+- `Dockerfile`: Python 3.11-slim + Node 18 + `@mongodb-js/mongodb-mcp-server` + pip deps
+- `.env.example` committed; `.env` in `.gitignore`
+- `docker compose --profile ollama up` for data-sovereignty deployments;
+  `docker compose up` for cloud-LLM deployments (no Ollama container started)
+- Health checks for all services; `agent` waits for `mongo-memory` before starting
 - `reports/` directory bind-mounted so reports are accessible on the host
-- `config/agent_config.yaml` overridable via `AGENT_CONFIG` env var
-- Works on macOS (Apple Silicon + Intel), Linux (amd64 + arm64), and Windows (WSL2)
-- `README.md` Docker section with exact commands: `docker compose up`, `docker compose exec agent python src/main_agentic.py --health-check`
+- Works on macOS (Apple Silicon + Intel), Linux (amd64 + arm64), Windows (WSL2)
 
 ---
 
-### BL-072 · One-line setup script for non-Docker environments
+### BL-075 · Data sovereignty mode
+**Priority:** P2 | **Size:** S
+
+**Story:** As a PS engineer deploying at a customer with strict data residency
+requirements, I want explicit documentation and a validated configuration that
+guarantees no data leaves the customer's premises.
+
+**Why this matters:**
+Customers in regulated industries (finance, healthcare, government) need a written
+guarantee and a verifiable configuration — not just an assumption that Ollama is
+local.
+
+**Acceptance criteria:**
+- `llm.provider: ollama` explicitly documented as the data-sovereignty mode in
+  `RUNBOOK.md` and `README.md`
+- Startup check: when `AGENT_DATA_SOVEREIGN=true`, agent refuses to start if
+  `llm.provider` is not `ollama` — prevents accidental cloud LLM use
+- Network egress check: log a warning if any outbound connection is made outside
+  the configured MongoDB and Ollama hosts
+- `AGENT_DATA_SOVEREIGN` env var documented in `.env.example` with explanation
+- Section in `RUNBOOK.md`: "Data Sovereignty Deployment" with Ollama-specific steps
+
+---
+
+### BL-072 · Non-Docker quickstart script
 **Priority:** P2 | **Size:** M
 
 **Story:** As a customer without Docker, I want a single setup script that installs
@@ -520,9 +613,7 @@ installation guide.
 - `setup.sh` (bash) and `setup.ps1` (PowerShell) cover Linux/macOS and Windows
 - Script checks and installs (or reports missing): Python 3.10+, Node 18+, Ollama,
   `@mongodb-js/mongodb-mcp-server`, Python venv + pip deps
-- Pulls `qwen2.5-coder:7b` if not already present
-- Starts both MongoDB instances if local MongoDB is available
-- Loads demo data via `create_demo_scenario.py`
+- Reads from `.env` if present; prompts for missing required vars
 - Ends with a success message and the exact command to run the first health check
 - Idempotent — safe to run twice without breaking an existing installation
 
