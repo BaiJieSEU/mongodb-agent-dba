@@ -2,10 +2,55 @@
 
 Updated: 2026-03-16 | Format: Epic → Story → Acceptance criteria
 
-
-
 Priority: **P0** = must-have for health-check goal | **P1** = high value | **P2** = medium | **P3** = nice-to-have
 Size: **S** < 1 day | **M** 1–3 days | **L** 3–7 days | **XL** > 7 days
+
+---
+
+## Backlog Summary
+
+**Sort order (always): Priority P0 → P1 → P2 → P3, then Size S → M → L → XL within each priority.**
+When adding or updating an item, re-insert it in the correct position — do not append to the end.
+
+| ID | Title | Priority | Size | Epic | Status |
+|---|---|---|---|---|---|
+| BL-020 | Structured report format | P0 | S | 3 | ✅ Done |
+| BL-001 | Server & connection health tool | P0 | M | 1 | ✅ Done |
+| BL-002 | Replication health tool | P0 | M | 1 | ✅ Done |
+| BL-003 | Collection storage stats tool | P0 | M | 1 | ✅ Done |
+| BL-004 | Index usage statistics tool | P0 | M | 1 | ✅ Done |
+| BL-021 | Severity thresholds config | P0 | S | 3 | 🔲 |
+| BL-010 | Health check pipeline | P0 | L | 2 | 🔲 |
+| BL-011 | Configurable scheduler | P0 | L | 2 | 🔲 |
+| BL-030 | Structured tool output (typed) | P0 | L | 4 | 🔲 |
+| BL-005 | Current operations tool | P1 | S | 1 | 🔲 |
+| BL-006 | Profiler configuration check | P1 | S | 1 | 🔲 |
+| BL-007 | Duplicate/redundant index detection | P1 | S | 1 | 🔲 |
+| BL-023 | Confidence scoring on recommendations | P1 | S | 3 | 🔲 |
+| BL-071 | Environment variable config support | P1 | S | 8 | 🔲 |
+| BL-008 | Aggregation pipeline analysis | P1 | M | 1 | 🔲 |
+| BL-012 | Trend comparison in scheduled runs | P1 | M | 2 | 🔲 |
+| BL-022 | Webhook / notification output | P1 | M | 3 | 🔲 |
+| BL-031 | Automatic tool parameter chaining | P1 | M | 4 | 🔲 |
+| BL-032 | Configurable LLM backend | P1 | M | 4 | 🔲 |
+| BL-060 | HTML report output | P1 | M | 7 | 🔲 |
+| BL-050 | Multi-cluster support | P1 | L | 6 | 🔲 |
+| BL-070 | Docker Compose deployment | P1 | L | 8 | 🔲 |
+| BL-033 | ESR index order validation | P2 | S | 4 | 🔲 |
+| BL-041 | Approval-gated profiler config | P2 | S | 5 | 🔲 |
+| BL-052 | Immutable audit trail | P2 | S | 6 | 🔲 |
+| BL-061 | Markdown report output | P2 | S | 7 | 🔲 |
+| BL-072 | One-line setup script | P2 | M | 8 | 🔲 |
+| BL-040 | Approval-gated index creation | P2 | L | 5 | 🔲 |
+| BL-051 | REST API + Web UI | P2 | XL | 6 | 🔲 |
+| BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
+| BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
+
+**Done:** 5 items (BL-020, BL-001, BL-002, BL-003, BL-004)
+**P0:** 4 remaining (BL-021, BL-010, BL-011, BL-030) — foundation for the health-check goal
+**P1:** 14 items — high-value once P0 is in place
+**P2–P3:** 9 items — important but not blocking
+**Total:** 32 items across 8 epics (5 done, 27 remaining)
 
 ---
 
@@ -252,6 +297,20 @@ best practices consistently.
 
 ---
 
+### BL-041 · Approval-gated profiler configuration
+**Priority:** P2 | **Size:** S
+
+**Story:** As a DBA, if the agent detects the profiler is off or threshold is too
+high, I want it to offer to fix the configuration with my approval.
+
+**Acceptance criteria:**
+- Agent detects `level: 0` or `slowms > 100` during health check (see BL-006)
+- Proposes exact `profile` command and asks for approval
+- On approval, runs `db.setProfilingLevel()` via non-read-only MCP client
+- New profiler status confirmed and stored in report
+
+---
+
 ### BL-040 · Approval-gated index creation
 **Priority:** P2 | **Size:** L
 
@@ -264,20 +323,6 @@ creation in the CLI so the agent executes it without me having to type the comma
 - Build index progress reported if `background: false` (MongoDB 8 always foreground)
 - Result (success / failure) stored in `agent_memory` alongside the investigation
 - If user declines, recommendation marked `deferred` in memory for future reference
-
----
-
-### BL-041 · Approval-gated profiler configuration
-**Priority:** P2 | **Size:** S
-
-**Story:** As a DBA, if the agent detects the profiler is off or threshold is too
-high, I want it to offer to fix the configuration with my approval.
-
-**Acceptance criteria:**
-- Agent detects `level: 0` or `slowms > 100` during health check (see BL-006)
-- Proposes exact `profile` command and asks for approval
-- On approval, runs `db.setProfilingLevel()` via non-read-only MCP client
-- New profiler status confirmed and stored in report
 
 ---
 
@@ -316,6 +361,20 @@ check against any registered cluster by name so I don't need to edit config file
 
 ---
 
+### BL-052 · Immutable audit trail
+**Priority:** P2 | **Size:** S
+
+**Story:** As a DBA, I want every recommendation the agent makes and every write
+it executes to be logged immutably so I have a complete record for post-incident review.
+
+**Acceptance criteria:**
+- New `audit_log` collection in `agent_memory` (no TTL, append-only)
+- Every recommendation emitted writes: `{timestamp, cluster, recommendation, confidence, approved_by}`
+- Every write executed (Epic 5) writes: `{timestamp, cluster, command, outcome, approved_by}`
+- No update or delete operations on `audit_log`
+
+---
+
 ### BL-051 · REST API + Web UI
 **Priority:** P2 | **Size:** XL
 
@@ -328,20 +387,6 @@ via a web interface so multiple people can access findings without SSH access.
 - Lightweight frontend (React or plain HTML) shows latest health check summary
   and allows drilling into sections and recommendations
 - `investigation_history` viewable with trend charts (connection count, slow query count)
-
----
-
-### BL-052 · Immutable audit trail
-**Priority:** P2 | **Size:** S
-
-**Story:** As a DBA, I want every recommendation the agent makes and every write
-it executes to be logged immutably so I have a complete record for post-incident review.
-
-**Acceptance criteria:**
-- New `audit_log` collection in `agent_memory` (no TTL, append-only)
-- Every recommendation emitted writes: `{timestamp, cluster, recommendation, confidence, approved_by}`
-- Every write executed (Epic 5) writes: `{timestamp, cluster, command, outcome, approved_by}`
-- No update or delete operations on `audit_log`
 
 ---
 
@@ -415,6 +460,27 @@ Ollama internals*
 
 ---
 
+### BL-071 · Environment variable config support
+**Priority:** P1 | **Size:** S
+
+**Story:** As a customer deploying in a CI/CD pipeline or Docker environment, I want
+to configure the agent entirely through environment variables so I don't need to edit
+`agent_config.yaml` or bake secrets into an image.
+
+**Acceptance criteria:**
+- All config values in `agent_config.yaml` have a corresponding `AGENT_*` env var override
+- Key mappings:
+  - `AGENT_MONGO_STORE` → `mongodb.agent_store`
+  - `AGENT_MONGO_CLUSTER` → `mongodb.monitored_cluster`
+  - `AGENT_OLLAMA_URL` → `ollama.base_url`
+  - `AGENT_OLLAMA_MODEL` → `ollama.model`
+  - `AGENT_SLOW_QUERY_MS` → `agent.slow_query_threshold_ms`
+- Env vars take precedence over the YAML file
+- `config_loader.py` applies env overrides after loading YAML
+- No secrets (passwords, API keys) stored in YAML or committed to the repo
+
+---
+
 ### BL-070 · Docker Compose deployment
 **Priority:** P1 | **Size:** L
 
@@ -443,27 +509,6 @@ steps for a customer to follow reliably. Docker Compose collapses this to one co
 
 ---
 
-### BL-071 · Environment variable config support
-**Priority:** P1 | **Size:** S
-
-**Story:** As a customer deploying in a CI/CD pipeline or Docker environment, I want
-to configure the agent entirely through environment variables so I don't need to edit
-`agent_config.yaml` or bake secrets into an image.
-
-**Acceptance criteria:**
-- All config values in `agent_config.yaml` have a corresponding `AGENT_*` env var override
-- Key mappings:
-  - `AGENT_MONGO_STORE` → `mongodb.agent_store`
-  - `AGENT_MONGO_CLUSTER` → `mongodb.monitored_cluster`
-  - `AGENT_OLLAMA_URL` → `ollama.base_url`
-  - `AGENT_OLLAMA_MODEL` → `ollama.model`
-  - `AGENT_SLOW_QUERY_MS` → `agent.slow_query_threshold_ms`
-- Env vars take precedence over the YAML file
-- `config_loader.py` applies env overrides after loading YAML
-- No secrets (passwords, API keys) stored in YAML or committed to the repo
-
----
-
 ### BL-072 · One-line setup script for non-Docker environments
 **Priority:** P2 | **Size:** M
 
@@ -480,8 +525,6 @@ installation guide.
 - Loads demo data via `create_demo_scenario.py`
 - Ends with a success message and the exact command to run the first health check
 - Idempotent — safe to run twice without breaking an existing installation
-
----
 
 ---
 
@@ -531,45 +574,3 @@ document counts via `count`. Computes avg bytes/doc and flags collections over t
 Index Usage section: `aggregate $indexStats` pipeline per collection. Parses BSON int64 `accesses.ops`
 (`{low, high, unsigned}` representation). Identifies unused indexes (ops=0), excludes `_id_` from
 drop candidates.
-
----
-
-## Backlog Summary
-
-**Sort order (always): Priority P0 → P1 → P2 → P3, then Size S → M → L → XL within each priority.**
-When adding or updating an item, re-insert it in the correct position — do not append to the end.
-
-| ID | Title | Priority | Size | Epic | Status |
-|---|---|---|---|---|---|
-| BL-021 | Severity thresholds config | P0 | S | 3 | 🔲 |
-| BL-010 | Health check pipeline | P0 | L | 2 | 🔲 |
-| BL-011 | Configurable scheduler | P0 | L | 2 | 🔲 |
-| BL-030 | Structured tool output (typed) | P0 | L | 4 | 🔲 |
-| BL-005 | Current operations tool | P1 | S | 1 | 🔲 |
-| BL-006 | Profiler configuration check | P1 | S | 1 | 🔲 |
-| BL-007 | Duplicate/redundant index detection | P1 | S | 1 | 🔲 |
-| BL-023 | Confidence scoring on recommendations | P1 | S | 3 | 🔲 |
-| BL-071 | Environment variable config support | P1 | S | 8 | 🔲 |
-| BL-008 | Aggregation pipeline analysis | P1 | M | 1 | 🔲 |
-| BL-012 | Trend comparison in scheduled runs | P1 | M | 2 | 🔲 |
-| BL-022 | Webhook / notification output | P1 | M | 3 | 🔲 |
-| BL-031 | Automatic tool parameter chaining | P1 | M | 4 | 🔲 |
-| BL-032 | Configurable LLM backend | P1 | M | 4 | 🔲 |
-| BL-060 | HTML report output | P1 | M | 7 | 🔲 |
-| BL-050 | Multi-cluster support | P1 | L | 6 | 🔲 |
-| BL-070 | Docker Compose deployment | P1 | L | 8 | 🔲 |
-| BL-033 | ESR index order validation | P2 | S | 4 | 🔲 |
-| BL-041 | Approval-gated profiler config | P2 | S | 5 | 🔲 |
-| BL-052 | Immutable audit trail | P2 | S | 6 | 🔲 |
-| BL-061 | Markdown report output | P2 | S | 7 | 🔲 |
-| BL-072 | One-line setup script | P2 | M | 8 | 🔲 |
-| BL-040 | Approval-gated index creation | P2 | L | 5 | 🔲 |
-| BL-051 | REST API + Web UI | P2 | XL | 6 | 🔲 |
-| BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
-| BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
-
-**Done:** 5 items (BL-020, BL-001, BL-002, BL-003, BL-004)
-**P0:** 4 remaining (BL-021, BL-010, BL-011, BL-030) — foundation for the health-check goal
-**P1:** 14 items — high-value once P0 is in place
-**P2–P3:** 9 items — important but not blocking
-**Total:** 32 items across 8 epics (5 done, 27 remaining)
