@@ -1,0 +1,89 @@
+{
+  "run_id": "hc_1773653770",
+  "timestamp": "2026-03-16T09:36:10.550843Z",
+  "cluster_uri": "mongodb://localhost:27018",
+  "overall_severity": "critical",
+  "sections": [
+    {
+      "name": "Cluster Overview",
+      "severity": "ok",
+      "signals": [
+        {
+          "name": "database_count",
+          "value": 4,
+          "unit": "databases"
+        },
+        {
+          "name": "collection_count",
+          "value": 0,
+          "unit": "collections"
+        }
+      ],
+      "findings": [
+        "4 user database(s), 0 collection(s) total.",
+        "  admin, Size: 40960 bytes: (empty)",
+        "  config, Size: 61440 bytes: (empty)",
+        "  local, Size: 40960 bytes: (empty)",
+        "  testdb, Size: 3661824 bytes: (empty)"
+      ]
+    },
+    {
+      "name": "Query Performance",
+      "severity": "warning",
+      "signals": [
+        {
+          "name": "slow_query_count",
+          "value": 6,
+          "unit": "queries",
+          "threshold": 5
+        },
+        {
+          "name": "max_execution_ms",
+          "value": 6,
+          "unit": "ms",
+          "threshold": 100
+        },
+        {
+          "name": "avg_execution_ms",
+          "value": 5.2,
+          "unit": "ms"
+        }
+      ],
+      "findings": [
+        "6 slow operation(s) found  (threshold: 5ms, max: 6ms, avg: 5ms).",
+        "  users: 6 op(s)  max 6ms  avg 5ms  up to 50,000 docs examined"
+      ]
+    },
+    {
+      "name": "Index Health",
+      "severity": "critical",
+      "signals": [
+        {
+          "name": "collections_checked",
+          "value": 1,
+          "unit": "collections"
+        },
+        {
+          "name": "under_indexed_collections",
+          "value": 1,
+          "unit": "collections",
+          "threshold": 0
+        }
+      ],
+      "findings": [
+        "  users: 1 index(es)",
+        "    Field: _id_: {\"_id\":1}",
+        "Under-indexed: users \u2014 only _id index present despite appearing in slow query log."
+      ]
+    }
+  ],
+  "recommendations": [
+    {
+      "priority": "high",
+      "collection": "users",
+      "action": "db.users.createIndex({\"find\": 1, \"filter\": 1})",
+      "evidence": "50,000 docs examined, 1 returned (5ms) \u2014 selectivity 0.0000, likely full collection scan",
+      "confidence": "high"
+    }
+  ]
+}

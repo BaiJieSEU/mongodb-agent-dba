@@ -212,7 +212,7 @@ against the previous run so I can see whether the cluster is getting better or w
 
 ---
 
-### BL-020 · Structured health check report format
+### BL-020 · Structured health check report format ✅ Done
 **Priority:** P0 | **Size:** S
 
 **Story:** As a DBA, I want health check output saved as a versioned JSON file
@@ -454,35 +454,37 @@ Advisor recommendations).
 
 ## Backlog Summary
 
-| ID | Title | Priority | Size | Epic |
-|---|---|---|---|---|
-| BL-001 | Server & connection health tool | P0 | M | 1 |
-| BL-002 | Replication health tool | P0 | M | 1 |
-| BL-003 | Collection storage stats tool | P0 | M | 1 |
-| BL-004 | Index usage statistics tool | P0 | M | 1 |
-| BL-010 | Health check pipeline | P0 | L | 2 |
-| BL-011 | Configurable scheduler | P0 | L | 2 |
-| BL-020 | Structured report format | P0 | S | 3 |
-| BL-021 | Severity thresholds config | P0 | S | 3 |
-| BL-030 | Structured tool output (typed) | P0 | L | 4 |
-| BL-005 | Current operations tool | P1 | S | 1 |
-| BL-006 | Profiler configuration check | P1 | S | 1 |
-| BL-007 | Duplicate/redundant index detection | P1 | S | 1 |
-| BL-008 | Aggregation pipeline analysis | P1 | M | 1 |
-| BL-012 | Trend comparison in scheduled runs | P1 | M | 2 |
-| BL-022 | Webhook / notification output | P1 | M | 3 |
-| BL-023 | Confidence scoring on recommendations | P1 | S | 3 |
-| BL-031 | Automatic tool parameter chaining | P1 | M | 4 |
-| BL-032 | Configurable LLM backend | P1 | M | 4 |
-| BL-050 | Multi-cluster support | P1 | L | 6 |
-| BL-033 | ESR index order validation | P2 | S | 4 |
-| BL-040 | Approval-gated index creation | P2 | L | 5 |
-| BL-041 | Approval-gated profiler config | P2 | S | 5 |
-| BL-051 | REST API + Web UI | P2 | XL | 6 |
-| BL-052 | Immutable audit trail | P2 | S | 6 |
-| BL-042 | Drop unused index (approval-gated) | P3 | S | 5 |
-| BL-053 | MongoDB Atlas integration | P3 | L | 6 |
+Sorted by priority, then size (S → M → L → XL).
 
-**P0 total:** 9 items (3L + 4M + 2S) — foundation for the health-check goal
-**P1 total:** 10 items — high-value once P0 is in place
-**P2–P3 total:** 7 items — important but not blocking
+| ID | Title | Priority | Size | Epic | Status |
+|---|---|---|---|---|---|
+| BL-020 | Structured report format | P0 | S | 3 | ✅ Done |
+| BL-021 | Severity thresholds config | P0 | S | 3 | 🔲 |
+| BL-001 | Server & connection health tool | P0 | M | 1 | 🔲 |
+| BL-002 | Replication health tool | P0 | M | 1 | 🔲 |
+| BL-003 | Collection storage stats tool | P0 | M | 1 | 🔲 |
+| BL-004 | Index usage statistics tool | P0 | M | 1 | 🔲 |
+| BL-010 | Health check pipeline | P0 | L | 2 | 🔲 |
+| BL-011 | Configurable scheduler | P0 | L | 2 | 🔲 |
+| BL-030 | Structured tool output (typed) | P0 | L | 4 | 🔲 |
+| BL-005 | Current operations tool | P1 | S | 1 | 🔲 |
+| BL-006 | Profiler configuration check | P1 | S | 1 | 🔲 |
+| BL-007 | Duplicate/redundant index detection | P1 | S | 1 | 🔲 |
+| BL-023 | Confidence scoring on recommendations | P1 | S | 3 | 🔲 |
+| BL-008 | Aggregation pipeline analysis | P1 | M | 1 | 🔲 |
+| BL-012 | Trend comparison in scheduled runs | P1 | M | 2 | 🔲 |
+| BL-022 | Webhook / notification output | P1 | M | 3 | 🔲 |
+| BL-031 | Automatic tool parameter chaining | P1 | M | 4 | 🔲 |
+| BL-032 | Configurable LLM backend | P1 | M | 4 | 🔲 |
+| BL-050 | Multi-cluster support | P1 | L | 6 | 🔲 |
+| BL-033 | ESR index order validation | P2 | S | 4 | 🔲 |
+| BL-041 | Approval-gated profiler config | P2 | S | 5 | 🔲 |
+| BL-052 | Immutable audit trail | P2 | S | 6 | 🔲 |
+| BL-040 | Approval-gated index creation | P2 | L | 5 | 🔲 |
+| BL-051 | REST API + Web UI | P2 | XL | 6 | 🔲 |
+| BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
+| BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
+
+**P0:** 9 items (BL-020 ✅ done, 8 remaining) — foundation for the health-check goal
+**P1:** 10 items — high-value once P0 is in place
+**P2–P3:** 7 items — important but not blocking
