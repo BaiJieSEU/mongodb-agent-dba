@@ -19,7 +19,7 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-002 | Replication health tool | P0 | M | 1 | ✅ Done |
 | BL-003 | Collection storage stats tool | P0 | M | 1 | ✅ Done |
 | BL-004 | Index usage statistics tool | P0 | M | 1 | ✅ Done |
-| BL-021 | Severity thresholds config | P0 | S | 3 | 🔲 |
+| BL-021 | Baseline-aware severity assessment | P0 | M | 3 | 🔲 |
 | BL-071 | Environment variable + secret config | P0 | S | 8 | 🔲 |
 | BL-032 | LangChain multi-LLM backend | P0 | M | 4 | 🔲 |
 | BL-010 | Health check pipeline | P0 | L | 2 | 🔲 |
@@ -182,18 +182,35 @@ against the previous run so I can see whether the cluster is getting better or w
 
 ---
 
-### BL-021 · Severity thresholds configuration
-**Priority:** P0 | **Size:** S
+### BL-021 · Baseline-aware severity assessment
+**Priority:** P0 | **Size:** M
 
-**Story:** As a DBA, I want to configure what constitutes a `warning` vs `critical`
-finding so the agent's thresholds match my cluster's normal operating range.
+**Story:** As an agentic DBA, I should determine severity by comparing current
+metrics against this cluster's own historical baseline — not against static
+thresholds configured by a human. A smart DBA learns what "normal" looks like
+for each cluster and flags meaningful deviations.
+
+**Design principles:**
+- **Hard safety limits** (universal, coded as constants — not configurable):
+  oplog window < 2h → CRITICAL; replication lag > 24h → CRITICAL; disk > 95% → CRITICAL.
+  These are always bad regardless of cluster context.
+- **Contextual severity** (derived from memory): everything else is judged relative
+  to this cluster's own historical baseline. "7 slow queries" is only meaningful
+  if the agent knows the cluster normally has 1 or normally has 50.
+- **Cold start** (no history yet): apply conservative universal defaults for the
+  first 3 runs, then switch to baseline comparison.
 
 **Acceptance criteria:**
-- Thresholds in `agent_config.yaml` under `health_check.thresholds`
-- Configurable: `replication_lag_warning_s`, `replication_lag_critical_s`,
-  `connection_utilisation_warning_pct`, `slow_query_count_warning`,
-  `unused_index_ops_threshold`, `oplog_window_warning_hours`
-- Defaults sensible out of the box
+- Agent reads prior health check runs from `agent_memory` before assigning severity
+- For each metric, computes baseline (rolling average of last N runs) and flags
+  deviations > configurable multiplier (e.g. 2×) as WARNING, > 3× as CRITICAL
+- Hard safety limits enforced as code constants — never overridden by baseline
+- Cold start handled: first 3 runs use conservative defaults, report states
+  "baseline not yet established (run N of 3)"
+- Report shows both the current value and the baseline: "7 slow queries
+  (baseline: 2, 3.5× above normal)"
+- The only human-configurable setting is the **alert filter** in `schedule.alert_on_severity`
+  (notification threshold) — not the severity logic itself
 
 ---
 
