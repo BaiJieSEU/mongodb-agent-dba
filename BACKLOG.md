@@ -15,86 +15,6 @@ Size: **S** < 1 day | **M** 1–3 days | **L** 3–7 days | **XL** > 7 days
 
 ---
 
-### BL-001 · Server & connection health tool
-**Priority:** P0 | **Size:** M
-
-**Story:** As the agent, I need to read `serverStatus` so a health check can report
-on connections, memory, lock wait time, and uptime.
-
-**Signals to collect:**
-- `connections.current` / `connections.available`
-- `globalLock.currentQueue.total`
-- `mem.resident` (MB), `mem.virtual`
-- `extra_info.page_faults`
-- `uptime` (seconds)
-- `version`
-
-**Acceptance criteria:**
-- New MCP tool `get_server_status` calls `runCommand({serverStatus: 1})` via MCP
-- Agent can answer "is the server under memory pressure?" using this data
-- Health check report includes a Server Health section
-- Values compared to configurable thresholds (connections, page faults)
-
----
-
-### BL-002 · Replication health tool
-**Priority:** P0 | **Size:** M
-
-**Story:** As the agent, I need to read `replSetGetStatus` so a health check can
-report on member states, replication lag, and oplog coverage.
-
-**Signals to collect:**
-- Member states (PRIMARY / SECONDARY / ARBITER / DOWN)
-- Replication lag = `optimeDate[primary]` − `optimeDate[secondary]` per member
-- Oplog window: size of `local.oplog.rs` ÷ average write rate
-
-**Acceptance criteria:**
-- New MCP tool `get_replication_status` covers all signals above
-- Agent flags any secondary with lag > configurable threshold (default 60s)
-- Agent flags oplog window < configurable minimum (default 24h)
-- Health check report includes a Replication section
-
----
-
-### BL-003 · Collection storage stats tool
-**Priority:** P0 | **Size:** M
-
-**Story:** As the agent, I need per-collection size, document count, and average
-document size so a health check can identify oversized collections and guide
-capacity planning.
-
-**Signals to collect:**
-- `storageSize`, `size` (dataSize), `count`, `avgObjSize` per collection
-- `totalIndexSize`
-- `wiredTiger.cache.bytes currently in the cache` (if available)
-
-**Acceptance criteria:**
-- New MCP tool `get_collection_stats` calls `collStats` via MCP
-- Supports iterating all collections in a database
-- Health check report includes top-N collections by size
-- Agent can answer "which collections are biggest?" without manual input
-
----
-
-### BL-004 · Index usage statistics tool
-**Priority:** P0 | **Size:** M
-
-**Story:** As the agent, I need `$indexStats` output so a health check can identify
-unused and underused indexes that should be dropped.
-
-**Signals to collect:**
-- Ops count per index since last restart
-- Index name, key pattern, size
-- Last-used timestamp
-
-**Acceptance criteria:**
-- New MCP tool `get_index_stats` runs `$indexStats` aggregation via MCP
-- Agent identifies indexes with zero ops since restart
-- Health check report lists "candidate indexes to drop" with usage counts
-- Agent does not recommend dropping `_id` indexes
-
----
-
 ### BL-005 · Current operations tool
 **Priority:** P1 | **Size:** S
 
@@ -211,20 +131,6 @@ against the previous run so I can see whether the cluster is getting better or w
 ## Epic 3 — Reporting & Alerting
 
 *Goal: findings reach the right people in a useful format*
-
----
-
-### BL-020 · Structured health check report format ✅ Done
-**Priority:** P0 | **Size:** S
-
-**Story:** As a DBA, I want health check output saved as a versioned JSON file
-so I can diff runs, feed them into other tools, or archive them.
-
-**Acceptance criteria:**
-- Report schema: `{ run_id, timestamp, cluster_uri, overall_severity, sections: [...], recommendations: [...] }`
-- Each section: `{ name, severity, signals: [...], findings: [...] }`
-- Each recommendation: `{ priority, collection, action, evidence, confidence }`
-- Written to `reports/` directory; older than 90 days auto-purged
 
 ---
 
@@ -577,6 +483,57 @@ installation guide.
 
 ---
 
+---
+
+## ✅ Done
+
+Items completed and shipped.
+
+---
+
+### BL-020 · Structured health check report format
+**Priority:** P0 | **Size:** S | **Epic:** 3
+
+Typed dataclass schema (`HealthCheckReport`, `ReportSection`, `Signal`, `Recommendation`, `HealthSeverity`)
+saved as versioned JSON to `reports/`. Rich console renderer in `main_agentic.py`.
+
+---
+
+### BL-001 · Server & connection health tool
+**Priority:** P0 | **Size:** M | **Epic:** 1
+
+Server Health section in `HealthCheckRunner`: version, hostname, uptime via `local.startup_log`;
+disk usage (fsUsedSize/fsTotalSize) via `db-stats` on admin DB. Note: connections/memory/page faults
+not obtainable via MCP (no `serverStatus` equivalent).
+
+---
+
+### BL-002 · Replication health tool
+**Priority:** P0 | **Size:** M | **Epic:** 1
+
+Replication Health section: RS config and member list via `local.system.replset`; oplog window
+(head/tail timestamps) via `local.oplog.rs`. Standalone instances handled gracefully ("not configured", OK severity).
+Note: per-member lag not available without `replSetGetStatus`.
+
+---
+
+### BL-003 · Collection storage stats tool
+**Priority:** P0 | **Size:** M | **Epic:** 1
+
+Storage & Capacity section: per-DB sizes via `db-stats`; per-collection sizes via `collection-storage-size`;
+document counts via `count`. Computes avg bytes/doc and flags collections over threshold.
+
+---
+
+### BL-004 · Index usage statistics tool
+**Priority:** P0 | **Size:** M | **Epic:** 1
+
+Index Usage section: `aggregate $indexStats` pipeline per collection. Parses BSON int64 `accesses.ops`
+(`{low, high, unsigned}` representation). Identifies unused indexes (ops=0), excludes `_id_` from
+drop candidates.
+
+---
+
 ## Backlog Summary
 
 **Sort order (always): Priority P0 → P1 → P2 → P3, then Size S → M → L → XL within each priority.**
@@ -584,12 +541,7 @@ When adding or updating an item, re-insert it in the correct position — do not
 
 | ID | Title | Priority | Size | Epic | Status |
 |---|---|---|---|---|---|
-| BL-020 | Structured report format | P0 | S | 3 | ✅ Done |
 | BL-021 | Severity thresholds config | P0 | S | 3 | 🔲 |
-| BL-001 | Server & connection health tool | P0 | M | 1 | ✅ Done |
-| BL-002 | Replication health tool | P0 | M | 1 | ✅ Done |
-| BL-003 | Collection storage stats tool | P0 | M | 1 | ✅ Done |
-| BL-004 | Index usage statistics tool | P0 | M | 1 | ✅ Done |
 | BL-010 | Health check pipeline | P0 | L | 2 | 🔲 |
 | BL-011 | Configurable scheduler | P0 | L | 2 | 🔲 |
 | BL-030 | Structured tool output (typed) | P0 | L | 4 | 🔲 |
@@ -616,7 +568,8 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
 | BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
 
-**P0:** 9 items (BL-020 ✅ done, 8 remaining) — foundation for the health-check goal
+**Done:** 5 items (BL-020, BL-001, BL-002, BL-003, BL-004)
+**P0:** 4 remaining (BL-021, BL-010, BL-011, BL-030) — foundation for the health-check goal
 **P1:** 14 items — high-value once P0 is in place
-**P2–P3:** 10 items — important but not blocking
-**Total:** 32 items across 8 epics
+**P2–P3:** 9 items — important but not blocking
+**Total:** 32 items across 8 epics (5 done, 27 remaining)
