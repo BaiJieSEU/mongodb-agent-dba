@@ -117,10 +117,13 @@ agent_memory (localhost:27017)
 ```
 
 ### Dynamic Tool Selection
-LLM reasons about which tools are needed based on:
+LLM produces an investigation plan (ordered list of tool calls + parameters) based on:
 - User intent classification
 - Historical context from memory
 - Question complexity analysis
+
+Tools are not hardcoded Python classes — they are logical names that `execute_tool()`
+dispatches to the corresponding MongoDB MCP Server operation via `MCPClient`.
 
 ## Investigation Workflow
 
@@ -145,10 +148,11 @@ LLM reasons about which tools are needed based on:
                         │
                         ▼
     ┌─────────────────────────────────────────────────────────┐
-    │              Tool Selection & Execution                 │
-    │  • Choose appropriate analysis tools (LLM)              │
-    │  • Execute selected tools with parameters               │
-    │  • Collect and process results                          │
+    │              Tool Selection & MCP Execution             │
+    │  • LLM produces ordered investigation plan              │
+    │  • MCPClient spawns MongoDB MCP Server subprocess       │
+    │  • Each tool maps to one MCP operation (read-only)      │
+    │  • Results parsed from MCP text content blocks          │
     └─────────────────────────────────────────────────────────┘
                         │
                         ▼
@@ -270,3 +274,6 @@ memory:
 - **Batch Processing**: Scheduled performance analysis
 
 Foundation architecture for memory-enhanced AI assistants that improve database operations over time.
+
+See [REQUIREMENTS.md](REQUIREMENTS.md) for a critical analysis of what the system can and
+cannot replace, and the full enhancement roadmap.

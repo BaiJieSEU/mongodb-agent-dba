@@ -1,247 +1,179 @@
-# MongoDB DBA Agent — Memory-Enhanced Agentic AI
+# MongoDB DBA Agent — Development Reference
 
-This project is an agentic AI system for MongoDB database administration with persistent memory capabilities that learns from past investigations.
+Agentic AI system for MongoDB DBA tasks. All database operations on the monitored cluster
+go through the official MongoDB MCP Server. Agent reasoning and memory run locally via Ollama.
 
 ## Environment Setup
 
 ### MongoDB Dual-Instance Setup
-- **Agent Memory Store**: Port 27017 (rs0) - Stores agent investigations and memory
-- **Monitored Database**: Port 27018 (rs1) - Target database for analysis
+- **Agent Memory Store**: Port 27017 (rs0) — stores agent investigations and memory
+- **Monitored Cluster**: Port 27018 (rs1) — target database under analysis
 - **MongoDB Version**: 8.0.4 Community Server
 - **Installation Location**: `~/mongodb/`
 
-### Configuration
+### Configuration Files
 - **Memory Store**: `~/mongodb/config/mongod.conf` (port 27017)
 - **Monitored DB**: `~/mongodb/config/mongod2.conf` (port 27018)
 - **Agent Config**: `config/agent_config.yaml`
 
 ## Development Rules
 - Never claim success without running end-to-end tests
-- After every change, verify with: `python src/main_agentic.py "my database is slow"`
-- Test memory persistence across multiple investigations
-- Ensure LLM reasoning drives tool selection (no hardcoded workflows)
+- After every change, verify with: `source venv/bin/activate && python src/main_agentic.py "my database is slow"`
+- Test memory persistence: run two investigations and confirm the second references the first
+- LLM reasoning must drive tool selection — no hardcoded workflows
 
-## Current Implementation Status
+## Current Implementation (v0.2.0)
 
-### ✅ Completed: Agentic AI Architecture
+### Core Agent
+**`src/agent/intelligent_agentic_agent.py`** — `IntelligentAgenticDBAAgent`
+- Intent classification via LLM → `DIRECT_ANSWER | DATABASE_METADATA | PERFORMANCE_ANALYSIS | COMPLEX_INVESTIGATION`
+- Tool selection via LLM → ordered investigation plan
+- All DB operations delegated to `MCPClient` (no direct PyMongo calls to the monitored cluster)
+- Memory-aware response synthesis referencing past investigations
 
-**Core Intelligence:**
-- **IntelligentAgenticDBAAgent** (`src/agent/intelligent_agentic_agent.py`)
-  - Intent classification using LLM (DIRECT_ANSWER, DATABASE_METADATA, PERFORMANCE_ANALYSIS)
-  - Dynamic tool selection based on semantic reasoning
-  - Memory-aware response generation with historical context
-  - No hardcoded rules - all decisions driven by LLM
+### MCP Tool Execution
+**`src/utils/mcp_client.py`** — `MCPClient`
+- Synchronous context-manager wrapper around `@mongodb-js/mongodb-mcp-server` (stdio)
+- Background thread + `asyncio.run()` so anyio cancel scopes stay in one task
+- One MCP subprocess per `investigate()` call; closed cleanly on exit
+- `--readOnly` flag enforced — no writes to the monitored cluster
 
-**Memory System:**
-- **AgentMemory** (`src/memory/agent_memory.py`)
-  - MongoDB-based persistent storage with TTL expiration
-  - Investigation history (30-day TTL)
-  - Performance issue tracking (90-day TTL)
-  - User context and pattern learning
-  - Recurring issue detection
+MCP operations used:
 
-**Analysis Tools:**
-- **SlowQueryFetcher** - Profiler data analysis with time windows and deduplication
-- **QueryExplainer** - explain() analysis and execution statistics  
-- **IndexChecker** - Index coverage analysis and ESR optimization
-- **MetadataInspector** - Database and collection information
+| Agent method | MCP tool | Notes |
+|---|---|---|
+| `_tool_list_collections` | `list-collections` | per-database |
+| `_tool_list_databases` | `list-databases` | cluster level |
+| `_tool_fetch_slow_queries` | `find` on `system.profile` | excludes `getmore`/`killCursors` |
+| `_tool_explain_query` | `explain` | find execution plan |
+| `_tool_check_indexes` | `collection-indexes` | per-collection |
 
-### ✅ CLI Interface
-- **Main Entry Point**: `src/main_agentic.py`
-- Rich console output with prerequisites checking
-- Handles natural language queries
-- Memory context integration
+### Memory System
+**`src/memory/agent_memory.py`** — `AgentMemory`
+- MongoDB-based persistent storage (port 27017, `agent_memory` database)
+- `investigations` collection — full investigation records (TTL 30 days)
+- `performance_issues` collection — recurring slow-query tracking (TTL 90 days)
+- `user_context` collection — patterns, no TTL
+- Upsert logic: `first_detected` lives only in `$setOnInsert`; `detection_count` incremented via `$inc`
+
+## Project Structure
+
+```
+mongodb-agent-dba/
+├── src/
+│   ├── agent/
+│   │   └── intelligent_agentic_agent.py  # Core AI agent + MCP dispatch
+│   ├── memory/
+│   │   ├── __init__.py
+│   │   └── agent_memory.py               # MongoDB-based persistent memory
+│   ├── models/
+│   │   └── query_models.py               # Pydantic data structures
+│   ├── utils/
+│   │   ├── mcp_client.py                 # Sync wrapper around MongoDB MCP Server
+│   │   ├── mongodb_client.py             # Agent store connection (PyMongo)
+│   │   └── config_loader.py             # YAML config loader
+│   └── main_agentic.py                   # CLI entry point
+├── config/
+│   └── agent_config.yaml                # Runtime configuration
+├── architecture.svg                     # Architecture diagram (dark-mode SVG)
+├── architecture_diagram.md              # Architecture narrative
+├── CHANGELOG.md                         # Version history
+├── REQUIREMENTS.md                      # Product scope and critical analysis
+├── requirements.txt                     # Python dependencies (pip)
+├── README.md                            # User-facing documentation
+├── create_demo_scenario.py              # Generates test data + slow queries
+└── CLAUDE.md                           # Development reference (this file)
+```
 
 ## Testing Protocol
 
-### Current Test Cases
-1. **Metadata Questions**:
-   ```bash
-   source venv/bin/activate && python src/main_agentic.py "how many collections do I have"
-   ```
-   Expected: Agent uses MetadataInspector tool, shows collection count
-
-2. **Performance Analysis**:
-   ```bash
-   source venv/bin/activate && python src/main_agentic.py "my database is slow"
-   ```
-   Expected: Agent uses SlowQueryFetcher + QueryExplainer + IndexChecker, provides recommendations
-
-3. **Memory Testing**:
-   ```bash
-   # Run first investigation
-   python src/main_agentic.py "check slow queries"
-   # Run second investigation - should reference previous findings
-   python src/main_agentic.py "my users collection is still slow"
-   ```
-   Expected: Second investigation references past investigation in memory
-
-4. **General Conversation**:
-   ```bash
-   python src/main_agentic.py "what's your name"
-   ```
-   Expected: Direct answer without database tools
-
-### Prerequisites Verification
+### Prerequisite Check
 ```bash
-# Check MongoDB instances
-lsof -i :27017  # Agent memory store
-lsof -i :27018  # Monitored cluster
+# MongoDB instances running
+lsof -i :27017   # agent memory store
+lsof -i :27018   # monitored cluster
 
-# Check Ollama
+# Ollama
 curl http://localhost:11434/api/tags
 
-# Verify test data exists
+# MCP Server installed
+mongodb-mcp-server --version
+
+# Test data and profiler entries
 python3 -c "
 import pymongo
 client = pymongo.MongoClient('mongodb://localhost:27018/')
 db = client['testdb']
-print(f'Users collection: {db.users.count_documents({})} documents')
-print(f'Products collection: {db.products.count_documents({})} documents')
-entries = list(db['system.profile'].find({'millis': {'\$gte': 5}}).limit(3))
-print(f'Slow queries available: {len(entries)}')
+print('users:', db.users.count_documents({}))
+print('products:', db.products.count_documents({}))
+print('slow queries (>=5ms):', db['system.profile'].count_documents({'millis': {'\$gte': 5}}))
 "
 ```
 
-## Quick Commands
-
-### Start Both MongoDB Instances
-```bash
-export PATH="$HOME/mongodb/bin:$PATH"
-# Start agent memory store
-mongod --config ~/mongodb/config/mongod.conf
-
-# Start monitored cluster  
-mongod --config ~/mongodb/config/mongod2.conf --fork
-```
-
-### Setup Demo Data
+If `system.profile` is empty, regenerate slow queries:
 ```bash
 python create_demo_scenario.py
 ```
 
-### Test Agent
+### Test Cases
+
+1. **Metadata question** → MCP `list-collections`:
+   ```bash
+   source venv/bin/activate && python src/main_agentic.py "how many collections do I have"
+   ```
+   Expected: agent calls `list_collections`, returns collection count
+
+2. **Performance analysis** → MCP `find` + `collection-indexes` + `explain`:
+   ```bash
+   python src/main_agentic.py "my database is slow"
+   ```
+   Expected: agent identifies slow queries on `users`, recommends email index
+
+3. **Memory continuity**:
+   ```bash
+   python src/main_agentic.py "check slow queries"
+   python src/main_agentic.py "is the users collection still slow?"
+   ```
+   Expected: second response references first investigation
+
+4. **Direct answer** (no DB tools):
+   ```bash
+   python src/main_agentic.py "what's your name"
+   ```
+   Expected: `DIRECT_ANSWER` intent, no MCP session opened
+
+## Quick Commands
+
 ```bash
-source venv/bin/activate
-python src/main_agentic.py "my database is slow"
+# Start both MongoDB instances
+export PATH="$HOME/mongodb/bin:$PATH"
+mongod --config ~/mongodb/config/mongod.conf          # port 27017
+mongod --config ~/mongodb/config/mongod2.conf --fork  # port 27018
+
+# Generate test data + slow profiler entries
+source venv/bin/activate && python create_demo_scenario.py
+
+# Run agent
+source venv/bin/activate && python src/main_agentic.py "my database is slow"
 ```
-
-## Project Structure (Current)
-
-```
-mongo-dba-agent/
-├── src/
-│   ├── agent/
-│   │   └── intelligent_agentic_agent.py  # Core agentic AI agent
-│   ├── memory/
-│   │   ├── __init__.py
-│   │   └── agent_memory.py               # MongoDB memory system
-│   ├── tools/
-│   │   ├── slow_query_fetcher.py         # Profiler analysis
-│   │   ├── query_explainer.py            # explain() analysis  
-│   │   ├── index_checker.py              # Index optimization
-│   │   ├── metadata_inspector.py         # Database metadata
-│   │   └── recommendation_generator.py   # Legacy (not used in agentic)
-│   ├── models/
-│   │   └── query_models.py               # Data structures
-│   ├── utils/
-│   │   ├── mongodb_client.py             # Database connections
-│   │   └── config_loader.py              # Configuration
-│   └── main_agentic.py                   # CLI entry point
-├── config/
-│   └── agent_config.yaml                # System configuration
-├── create_demo_scenario.py              # Test data generator
-├── requirements.txt                     # Dependencies
-├── README.md                            # User documentation
-├── architecture_diagram.md              # Technical documentation
-└── CLAUDE.md                           # Development context (this file)
-```
-
-## Key Features Implemented
-
-### 1. True Agentic Behavior
-- **No Hardcoded Workflows**: LLM decides which tools to use based on user intent
-- **Semantic Understanding**: Classifies intent without rigid rules
-- **Adaptive Responses**: Different output formats for different question types
-
-### 2. Memory Enhancement
-- **Persistent Learning**: Stores investigations in MongoDB with TTL
-- **Context Building**: References past investigations in new responses
-- **Pattern Recognition**: Detects recurring performance issues
-- **Historical Awareness**: "I see you asked about this before..." type responses
-
-### 3. Intelligence Examples
-```bash
-# Metadata question → Uses MetadataInspector
-"how many collections do I have"
-
-# Performance question → Uses SlowQueryFetcher + QueryExplainer + IndexChecker  
-"my database is slow"
-
-# General question → Direct LLM response, no tools
-"what's your name"
-
-# Follow-up with memory → References past investigation
-"is my users collection still slow?"
-```
-
-## Technology Stack (Actual)
-
-### Core Technologies
-- **Python 3.11+**: Application runtime
-- **LangChain + Ollama**: LLM integration for reasoning
-- **QWEN 2.5-coder:7b**: Local LLM model
-- **PyMongo**: MongoDB driver
-- **Rich**: Console formatting
-
-### Infrastructure  
-- **MongoDB 8.0.4**: Dual-instance setup
-- **Ollama**: Local LLM serving
-- **YAML**: Configuration management
-
-## Development Notes
-
-### What Makes This "Agentic"
-1. **LLM-Driven Decisions**: No if/else logic for tool selection
-2. **Natural Language Understanding**: Parses human intent semantically
-3. **Memory Integration**: Learns from past interactions
-4. **Adaptive Planning**: Investigation strategy varies by question complexity
-
-### Memory System Benefits
-- **Learning Over Time**: Agent gets smarter with more investigations
-- **Recurring Issue Detection**: "I've seen this pattern before..."
-- **Context Continuity**: References past work in recommendations
-- **Pattern Recognition**: Builds knowledge base of database issues
-
-### Future Enhancements
-- **Multi-Database Support**: Extend to multiple monitored clusters
-- **Remote LLM Integration**: Add GPT/Claude options alongside local LLM
-- **MongoDB Enterprise**: Integrate with Ops Manager and Atlas
-- **Web Interface**: Replace CLI with dashboard
 
 ## Troubleshooting
 
-### Agent Not Starting
-1. Check MongoDB instances: `lsof -i :27017 && lsof -i :27018`
-2. Check Ollama: `curl http://localhost:11434/api/tags`
-3. Check Python environment: `source venv/bin/activate`
+| Symptom | Check |
+|---|---|
+| Agent won't start | `lsof -i :27017`, `lsof -i :27018`, `curl localhost:11434/api/tags` |
+| MCP session timeout | `mongodb-mcp-server --version`; confirm Node 18+ installed |
+| No slow queries found | Run `python create_demo_scenario.py`; profiler must be level 1, `slowms≤5` |
+| Memory not persisting | Check `agent_memory` database on port 27017; verify TTL indexes exist |
+| `first_detected` conflict | Fixed in v0.2.0 — ensure `agent_memory.py` uses `pop()` before upsert |
 
-### Memory Not Working
-1. Verify agent store connection: MongoDB on port 27017
-2. Check agent_memory database exists
-3. Look for TTL collections: investigations, performance_issues, user_context
+## Technology Stack
 
-### No Slow Queries Found
-1. Generate test data: `python create_demo_scenario.py`
-2. Verify profiler enabled: Check system.profile collection on port 27018
-3. Lower threshold in config: `slow_query_threshold_ms: 1`
-
-## Current Status: Production Ready POC
-
-**✅ Agentic Intelligence**: LLM-driven reasoning and tool selection working
-**✅ Memory System**: Persistent learning with MongoDB storage functional
-**✅ Analysis Tools**: All 4 tools integrated and working
-**✅ Natural Language**: Intent classification and conversation handling
-**✅ Demo Scenarios**: Reproducible test cases with real performance improvements
-
-**Foundation established for memory-enhanced AI assistants that improve database operations through persistent learning.**
+| Layer | Technology |
+|---|---|
+| LLM reasoning | Ollama + `qwen2.5-coder:7b` |
+| DB tool execution | `@mongodb-js/mongodb-mcp-server` (Node 18+) |
+| MCP client | Python `mcp` SDK (`mcp[cli]>=1.0.0`) |
+| Agent memory store | PyMongo + MongoDB 8.0 (port 27017) |
+| CLI / output | Python `rich` |
+| Config | PyYAML |

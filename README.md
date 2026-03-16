@@ -156,6 +156,12 @@ The agent's logical tools map directly to MongoDB MCP Server operations:
 
 The MCP Server runs in **read-only mode** — no writes to the monitored cluster.
 
+## Scope & Roadmap
+
+See [REQUIREMENTS.md](REQUIREMENTS.md) for a critical analysis of what this system can
+and cannot replace (spoiler: it is an AI-augmented DBA tool, not an autonomous DBA),
+the task gaps, and the enhancement roadmap.
+
 ## License
 
 MIT
