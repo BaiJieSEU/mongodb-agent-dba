@@ -1,4 +1,4 @@
-"""Intelligent Agentic MongoDB DBA Agent with semantic understanding"""
+"""Intelligent Agentic MongoDB DBA Agent — MCP-powered tool execution"""
 
 import logging
 import time
@@ -10,76 +10,70 @@ from langchain_ollama import OllamaLLM
 
 from utils.mongodb_client import MongoDBManager
 from utils.config_loader import AppConfig
-from tools.slow_query_fetcher import SlowQueryFetcher
-from tools.query_explainer import QueryExplainer
-from tools.index_checker import IndexChecker
-from tools.metadata_inspector import MetadataInspector
+from utils.mcp_client import MCPClient
 from memory.agent_memory import AgentMemory, Investigation, PerformanceIssue
 
 logger = logging.getLogger(__name__)
 
 
 class IntelligentAgenticDBAAgent:
-    """Intelligent AI Agent with semantic understanding and natural tool selection"""
-    
+    """Intelligent AI Agent with semantic understanding and MCP-based tool execution"""
+
     def __init__(self, config: AppConfig, mongo_manager: MongoDBManager):
         self.config = config
         self.mongo_manager = mongo_manager
-        
-        # Initialize LLM
+
+        # LLM
         self.llm = OllamaLLM(
             base_url=config.ollama.base_url,
             model=config.ollama.model,
-            temperature=0.1
+            temperature=0.1,
         )
-        
-        # Initialize memory system
+
+        # Memory (agent store on port 27017)
         self.memory = AgentMemory(
             connection_string=config.mongodb.agent_store,
-            database_name="agent_memory"
+            database_name="agent_memory",
         )
-        
-        # Initialize tools
+
+        # MCP server targets the monitored cluster (port 27018)
+        self._mcp_uri = config.mongodb.monitored_cluster
+
+        # Tool registry — no more Python class handlers, execution goes via MCP
         self.tools = {
             "list_collections": {
-                "handler": MetadataInspector(mongo_manager),
-                "method": "get_collections_info",
                 "description": "Shows what collections exist in a database with document counts and sizes",
                 "use_when": "User wants to know about database structure, available collections, or collection metadata",
-                "example_queries": ["what collections do I have", "show me my tables", "how many collections"]
+                "example_queries": ["what collections do I have", "show me my tables", "how many collections"],
             },
             "list_databases": {
-                "handler": MetadataInspector(mongo_manager),
-                "method": "get_database_info", 
                 "description": "Shows available databases with basic statistics",
                 "use_when": "User wants to know what databases are available or database-level information",
-                "example_queries": ["what databases exist", "show me available databases"]
+                "example_queries": ["what databases exist", "show me available databases"],
             },
             "fetch_slow_queries": {
-                "handler": SlowQueryFetcher(mongo_manager),
-                "method": "fetch_slow_queries",
-                "description": "Identifies queries that are performing poorly or taking too long",
+                "description": "Identifies queries that are performing poorly or taking too long, from the MongoDB profiler",
                 "use_when": "User reports performance problems, slowness, or wants optimization",
-                "example_queries": ["database is slow", "find bottlenecks", "performance issues"]
+                "example_queries": ["database is slow", "find bottlenecks", "performance issues"],
             },
             "explain_query": {
-                "handler": QueryExplainer(mongo_manager),
-                "method": "explain_query",
-                "description": "Analyzes specific query execution plans to understand performance",
-                "use_when": "Need to understand why specific queries are slow",
-                "example_queries": ["why is this query slow", "analyze query performance"]
+                "description": "Analyzes the execution plan of a specific query to understand why it is slow",
+                "use_when": "Need to understand why a specific query is slow after identifying it",
+                "example_queries": ["why is this query slow", "analyze query performance"],
             },
             "check_indexes": {
-                "handler": IndexChecker(mongo_manager),
-                "method": "suggest_missing_indexes_for_queries",
-                "description": "Reviews index optimization opportunities for queries",
-                "use_when": "Need to suggest index improvements for better performance",
-                "example_queries": ["optimize indexes", "suggest database improvements"]
-            }
+                "description": "Lists existing indexes on a collection and identifies optimization opportunities",
+                "use_when": "Need to review index coverage and suggest index improvements",
+                "example_queries": ["optimize indexes", "what indexes do I have", "suggest index improvements"],
+            },
         }
-    
+
+        # Active MCP client — set during investigate()
+        self._mcp: Optional[MCPClient] = None
+
+    # ── LLM helpers ────────────────────────────────────────────────────────────
+
     def clean_llm_response(self, response: str) -> str:
-        """Clean LLM response by removing markdown code blocks"""
         response = response.strip()
         if response.startswith("```json"):
             response = response[7:]
@@ -88,33 +82,34 @@ class IntelligentAgenticDBAAgent:
         if response.endswith("```"):
             response = response[:-3]
         return response.strip()
-    
-    def classify_user_intent(self, user_input: str, memory_context: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Use LLM to understand user intent and determine appropriate response"""
-        
-        # Include memory context in the prompt
+
+    def classify_user_intent(
+        self, user_input: str, memory_context: Dict[str, Any] = None
+    ) -> Dict[str, Any]:
         memory_summary = ""
         if memory_context:
             recent_count = len(memory_context.get("recent_investigations", []))
             recurring_count = len(memory_context.get("recurring_issues", []))
-            total_investigations = memory_context.get("total_investigations", 0)
-            
+            total = memory_context.get("total_investigations", 0)
             memory_summary = f"""
 MEMORY CONTEXT:
-- Total past investigations: {total_investigations}
+- Total past investigations: {total}
 - Recent investigations (last 7 days): {recent_count}
 - Recurring unresolved issues: {recurring_count}
 """
-            
             if memory_context.get("recent_investigations"):
                 memory_summary += "\nRecent investigations:\n"
                 for inv in memory_context["recent_investigations"]:
                     memory_summary += f"- {inv.get('timestamp', '')}: {inv.get('user_query', '')[:50]}...\n"
-            
+
             if memory_context.get("recurring_issues"):
                 memory_summary += "\nRecurring performance issues:\n"
                 for issue in memory_context["recurring_issues"]:
-                    memory_summary += f"- {issue.get('collection', '')}: {issue.get('query_pattern', '')[:30]}... (detected {issue.get('detection_count', 0)} times)\n"
+                    memory_summary += (
+                        f"- {issue.get('collection', '')}: "
+                        f"{issue.get('query_pattern', '')[:30]}... "
+                        f"(detected {issue.get('detection_count', 0)} times)\n"
+                    )
 
         intent_prompt = f"""
 You are a MongoDB DBA AI assistant with memory of past investigations. Analyze this user request and determine how to respond.
@@ -125,7 +120,7 @@ USER REQUEST: "{user_input}"
 Consider these categories:
 1. **DIRECT_ANSWER**: Questions that don't need database analysis (greetings, identity questions, general chat)
 2. **DATABASE_METADATA**: Questions about database structure, collections, schemas
-3. **PERFORMANCE_ANALYSIS**: Questions about slow queries, optimization, performance issues  
+3. **PERFORMANCE_ANALYSIS**: Questions about slow queries, optimization, performance issues
 4. **COMPLEX_INVESTIGATION**: Multi-step questions requiring several tools
 
 Analyze the request and respond with JSON:
@@ -145,14 +140,10 @@ Examples:
 - "database is slow" → PERFORMANCE_ANALYSIS (performance tools needed)
 - "optimize my database" → COMPLEX_INVESTIGATION (multiple tools needed)
 """
-
         try:
             response = self.llm.invoke(intent_prompt)
-            logger.info(f"Intent classification: {response}")
-            
-            clean_response = self.clean_llm_response(response)
-            intent = json.loads(clean_response)
-            
+            logger.info("Intent classification: %s", response)
+            intent = json.loads(self.clean_llm_response(response))
             return {
                 "category": intent.get("intent_category", "DATABASE_METADATA"),
                 "confidence": intent.get("confidence", 0.5),
@@ -160,28 +151,28 @@ Examples:
                 "requires_database": intent.get("requires_database", True),
                 "suggested_response": intent.get("suggested_response", ""),
                 "tool_needed": intent.get("tool_needed"),
-                "database_target": "testdb"  # Default to testdb
+                "database_target": "testdb",
             }
-            
         except Exception as e:
-            logger.error(f"Error in intent classification: {e}")
-            # Safe fallback
+            logger.error("Error in intent classification: %s", e)
             return {
                 "category": "DATABASE_METADATA",
                 "confidence": 0.3,
-                "reasoning": f"Fallback due to classification error: {str(e)}",
+                "reasoning": f"Fallback due to classification error: {e}",
                 "requires_database": True,
                 "suggested_response": "",
                 "tool_needed": "list_collections",
-                "database_target": "testdb"
+                "database_target": "testdb",
             }
-    
-    def select_tools_intelligently(self, user_input: str, intent: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Use LLM to intelligently select and sequence tools based on semantic understanding"""
-        
-        tool_descriptions = {name: tool["description"] + " | Use when: " + tool["use_when"] 
-                           for name, tool in self.tools.items()}
-        
+
+    def select_tools_intelligently(
+        self, user_input: str, intent: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        tool_descriptions = {
+            name: tool["description"] + " | Use when: " + tool["use_when"]
+            for name, tool in self.tools.items()
+        }
+
         selection_prompt = f"""
 You are planning an investigation for a MongoDB DBA task.
 
@@ -215,208 +206,267 @@ Respond with JSON:
 
 Guidelines:
 - For metadata questions: Usually 1 tool (list_collections, list_databases)
-- For performance questions: Usually 3-4 tools (fetch_slow_queries → explain_query → check_indexes)
+- For performance questions: Usually 2-3 tools (fetch_slow_queries → check_indexes → explain_query)
 - Choose tools based on what the user actually asked, not rigid rules
 """
-
         try:
             response = self.llm.invoke(selection_prompt)
-            logger.info(f"Tool selection: {response}")
-            
-            clean_response = self.clean_llm_response(response)
-            plan = json.loads(clean_response)
-            
+            logger.info("Tool selection: %s", response)
+            plan = json.loads(self.clean_llm_response(response))
             return plan.get("investigation_plan", [])
-            
         except Exception as e:
-            logger.error(f"Error in tool selection: {e}")
-            # Intelligent fallback based on intent
+            logger.error("Error in tool selection: %s", e)
             if intent["category"] == "DATABASE_METADATA":
                 return [{
                     "step": 1,
                     "tool": "list_collections",
                     "reasoning": "Fallback: provide database structure information",
                     "parameters": {"database": "testdb"},
-                    "expected_outcome": "List of collections in database"
+                    "expected_outcome": "List of collections in database",
                 }]
-            elif intent["category"] == "PERFORMANCE_ANALYSIS":
+            elif intent["category"] in ("PERFORMANCE_ANALYSIS", "COMPLEX_INVESTIGATION"):
                 return [{
                     "step": 1,
-                    "tool": "fetch_slow_queries", 
+                    "tool": "fetch_slow_queries",
                     "reasoning": "Fallback: identify performance bottlenecks",
                     "parameters": {"database": "testdb"},
-                    "expected_outcome": "List of slow queries"
+                    "expected_outcome": "List of slow queries",
                 }]
-            else:
-                return []
-    
-    def execute_tool(self, tool_name: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """Execute a specific tool with given parameters"""
-        logger.info(f"Executing tool: {tool_name} with parameters: {parameters}")
-        
+            return []
+
+    # ── MCP tool execution ─────────────────────────────────────────────────────
+
+    def execute_tool(
+        self, tool_name: str, parameters: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        logger.info("Executing tool: %s with parameters: %s", tool_name, parameters)
         try:
-            if tool_name not in self.tools:
-                return {"success": False, "error": f"Unknown tool: {tool_name}"}
-            
-            tool_info = self.tools[tool_name]
-            handler = tool_info["handler"]
-            method_name = tool_info["method"]
-            
             if tool_name == "list_collections":
-                result = handler.get_collections_info(parameters.get("database", "testdb"))
-                return {
-                    "success": True,
-                    "tool": tool_name,
-                    "data": result,
-                    "summary": f"Found {result.get('collection_count', 0)} collections"
-                }
-                
+                return self._tool_list_collections(parameters)
             elif tool_name == "list_databases":
-                result = handler.get_database_info()
-                return {
-                    "success": True,
-                    "tool": tool_name,
-                    "data": result,
-                    "summary": f"Found {result.get('database_count', 0)} databases"
-                }
-                
+                return self._tool_list_databases()
             elif tool_name == "fetch_slow_queries":
-                queries = handler.fetch_slow_queries(
-                    db_name=parameters.get("database", "testdb"),
-                    threshold_ms=parameters.get("threshold_ms", 5),
-                    limit=parameters.get("limit", 10),
-                    hours_back=parameters.get("hours_back", 2)
-                )
-                return {
-                    "success": True,
-                    "tool": tool_name,
-                    "data": [
-                        {
-                            "collection": q.collection,
-                            "query": q.query,
-                            "execution_time_ms": q.execution_time_ms,
-                            "docs_examined": q.docs_examined,
-                            "docs_returned": q.docs_returned,
-                            "operation": q.operation
-                        } for q in queries
-                    ],
-                    "summary": f"Found {len(queries)} slow queries"
-                }
-                
+                return self._tool_fetch_slow_queries(parameters)
+            elif tool_name == "explain_query":
+                return self._tool_explain_query(parameters)
+            elif tool_name == "check_indexes":
+                return self._tool_check_indexes(parameters)
             else:
-                return {"success": False, "error": f"Tool execution not implemented: {tool_name}"}
-                
+                return {"success": False, "tool": tool_name, "error": f"Unknown tool: {tool_name}"}
         except Exception as e:
-            logger.error(f"Error executing tool {tool_name}: {e}")
-            return {"success": False, "error": str(e)}
-    
+            logger.error("Error executing tool %s: %s", tool_name, e)
+            return {"success": False, "tool": tool_name, "error": str(e)}
+
+    def _tool_list_collections(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        db = params.get("database", "testdb")
+        # MCP returns one text block per collection: "Name: <collection>"
+        blocks = self._mcp.call_tool("list-collections", {"database": db})
+        collections = [b.replace("Name: ", "").strip() for b in blocks if b.startswith("Name:")]
+        return {
+            "success": True,
+            "tool": "list_collections",
+            "data": {"database": db, "collections": collections, "collection_count": len(collections)},
+            "summary": f"Found {len(collections)} collections in '{db}'",
+        }
+
+    def _tool_list_databases(self) -> Dict[str, Any]:
+        blocks = self._mcp.call_tool("list-databases", {})
+        databases = [b.replace("Name: ", "").strip() for b in blocks if b.startswith("Name:")]
+        return {
+            "success": True,
+            "tool": "list_databases",
+            "data": {"databases": databases, "database_count": len(databases)},
+            "summary": f"Found {len(databases)} databases",
+        }
+
+    def _tool_fetch_slow_queries(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        db = params.get("database", "testdb")
+        threshold_ms = params.get("threshold_ms", self.config.agent.slow_query_threshold_ms)
+        limit = params.get("limit", self.config.agent.max_queries_to_analyze)
+
+        # MCP returns: first block = header, rest = JSON docs
+        blocks = self._mcp.call_tool("find", {
+            "database": db,
+            "collection": "system.profile",
+            "filter": {"millis": {"$gte": threshold_ms}},
+            "sort": {"ts": -1},
+            "limit": limit,
+        })
+
+        queries = []
+        for block in blocks[1:]:  # skip header block
+            try:
+                doc = json.loads(block)
+                ns = doc.get("ns", "")
+                collection = ns.split(".", 1)[-1] if "." in ns else ns
+                queries.append({
+                    "collection": collection,
+                    "query": doc.get("query", doc.get("command", {})),
+                    "execution_time_ms": doc.get("millis", 0),
+                    "docs_examined": doc.get("docsExamined", 0),
+                    "docs_returned": doc.get("nreturned", 0),
+                    "operation": doc.get("op", "query"),
+                })
+            except (json.JSONDecodeError, AttributeError):
+                continue
+
+        return {
+            "success": True,
+            "tool": "fetch_slow_queries",
+            "data": queries,
+            "summary": f"Found {len(queries)} slow queries (threshold: {threshold_ms}ms)",
+        }
+
+    def _tool_explain_query(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        db = params.get("database", "testdb")
+        collection = params.get("collection", "users")
+        filter_query = params.get("filter", {})
+
+        blocks = self._mcp.call_tool("explain", {
+            "database": db,
+            "collection": collection,
+            "method": [{"name": "find", "arguments": {"filter": filter_query}}],
+        })
+        return {
+            "success": True,
+            "tool": "explain_query",
+            "data": "\n".join(blocks),
+            "summary": f"Execution plan retrieved for '{collection}'",
+        }
+
+    def _tool_check_indexes(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        db = params.get("database", "testdb")
+        collection = params.get("collection", "users")
+
+        blocks = self._mcp.call_tool("collection-indexes", {
+            "database": db,
+            "collection": collection,
+        })
+        indexes = [b for b in blocks if b.startswith("Field:")]
+        return {
+            "success": True,
+            "tool": "check_indexes",
+            "data": {"collection": collection, "indexes": indexes, "index_count": len(indexes)},
+            "summary": f"Found {len(indexes)} indexes on '{collection}'",
+        }
+
+    # ── memory helpers ─────────────────────────────────────────────────────────
+
     def _create_query_hash(self, query: Dict[str, Any], collection: str) -> str:
-        """Create a hash for query pattern to identify recurring issues"""
         query_str = json.dumps(query, sort_keys=True) + collection
         return hashlib.md5(query_str.encode()).hexdigest()
-    
-    def _store_investigation_memory(self, user_input: str, intent: Dict[str, Any], 
-                                  tool_results: List[Dict[str, Any]], 
-                                  investigation_time: float, final_response: str):
-        """Store the investigation in memory for future reference"""
+
+    def _store_investigation_memory(
+        self,
+        user_input: str,
+        intent: Dict[str, Any],
+        tool_results: List[Dict[str, Any]],
+        investigation_time: float,
+        final_response: str,
+    ) -> None:
         try:
-            # Create investigation record
             investigation = Investigation(
                 investigation_id=f"inv_{int(time.time())}",
                 timestamp=datetime.utcnow(),
                 user_query=user_input,
                 intent_category=intent["category"],
                 database_analyzed=intent.get("database_target", "testdb"),
-                tools_used=[result.get("tool", "unknown") for result in tool_results],
+                tools_used=[r.get("tool", "unknown") for r in tool_results],
                 findings={
                     "tool_results": tool_results,
-                    "final_response_summary": final_response[:200] + "..." if len(final_response) > 200 else final_response
+                    "final_response_summary": (
+                        final_response[:200] + "..."
+                        if len(final_response) > 200
+                        else final_response
+                    ),
                 },
-                recommendations=[],  # Will be populated if performance analysis
-                investigation_time_seconds=investigation_time
+                recommendations=[],
+                investigation_time_seconds=investigation_time,
             )
-            
-            # Extract recommendations from tool results
+
             recommendations = []
             performance_issues = []
-            
+
             for result in tool_results:
                 if result.get("tool") == "fetch_slow_queries" and result.get("success"):
-                    # Store performance issues for each slow query
-                    slow_queries = result.get("data", [])
-                    for query_data in slow_queries:
-                        query_hash = self._create_query_hash(
-                            query_data.get("query", {}), 
-                            query_data.get("collection", "")
+                    for qdata in result.get("data", []):
+                        qhash = self._create_query_hash(
+                            qdata.get("query", {}), qdata.get("collection", "")
                         )
-                        
                         issue = PerformanceIssue(
-                            issue_id=f"perf_{query_hash}",
+                            issue_id=f"perf_{qhash}",
                             database=intent.get("database_target", "testdb"),
-                            collection=query_data.get("collection", ""),
-                            query_pattern=str(query_data.get("query", {}))[:200],
-                            query_hash=query_hash,
+                            collection=qdata.get("collection", ""),
+                            query_pattern=str(qdata.get("query", {}))[:200],
+                            query_hash=qhash,
                             first_detected=datetime.utcnow(),
                             last_detected=datetime.utcnow(),
                             detection_count=1,
-                            avg_execution_time_ms=query_data.get("execution_time_ms", 0),
-                            recommended_action=f"Analyze execution plan and consider indexing for {query_data.get('collection', 'collection')}",
-                            severity="medium"
+                            avg_execution_time_ms=qdata.get("execution_time_ms", 0),
+                            recommended_action=(
+                                f"Analyze execution plan and consider indexing "
+                                f"for {qdata.get('collection', 'collection')}"
+                            ),
+                            severity="medium",
                         )
                         performance_issues.append(issue)
-                        
                         recommendations.append({
                             "type": "performance",
-                            "collection": query_data.get("collection"),
-                            "action": f"Optimize query with {query_data.get('execution_time_ms', 0)}ms execution time",
-                            "priority": "medium"
+                            "collection": qdata.get("collection"),
+                            "action": f"Optimize query with {qdata.get('execution_time_ms', 0)}ms execution time",
+                            "priority": "medium",
                         })
-            
+
             investigation.recommendations = recommendations
-            
-            # Store in memory
             inv_id = self.memory.store_investigation(investigation)
-            
-            # Store performance issues
             for issue in performance_issues:
                 self.memory.store_performance_issue(issue)
-                
-            logger.info(f"Stored investigation {inv_id} with {len(performance_issues)} performance issues")
-            
+
+            logger.info(
+                "Stored investigation %s with %d performance issues",
+                inv_id,
+                len(performance_issues),
+            )
         except Exception as e:
-            logger.error(f"Error storing investigation memory: {e}")
-    
-    def _generate_memory_aware_response(self, user_input: str, intent: Dict[str, Any],
-                                      tool_results: List[Dict[str, Any]], 
-                                      memory_context: Dict[str, Any]) -> str:
-        """Generate response that incorporates memory context"""
-        
+            logger.error("Error storing investigation memory: %s", e)
+
+    # ── response generation ────────────────────────────────────────────────────
+
+    def _generate_memory_aware_response(
+        self,
+        user_input: str,
+        intent: Dict[str, Any],
+        tool_results: List[Dict[str, Any]],
+        memory_context: Dict[str, Any],
+    ) -> str:
         if intent["category"] == "DIRECT_ANSWER":
-            return intent.get("suggested_response", 
-                             "I'm a MongoDB DBA assistant. How can I help you with your database?")
-        
-        # Build memory-aware context for LLM
+            return intent.get(
+                "suggested_response",
+                "I'm a MongoDB DBA assistant. How can I help you with your database?",
+            )
+
         memory_context_str = ""
-        
-        # Check for recurring issues
         recurring_issues = memory_context.get("recurring_issues", [])
         if recurring_issues:
             memory_context_str += "\n🔄 RECURRING ISSUES DETECTED:\n"
-            for issue in recurring_issues[:3]:  # Top 3
-                memory_context_str += f"- {issue.get('collection', 'unknown')}: {issue.get('recommended_action', 'no action')} "
-                memory_context_str += f"(detected {issue.get('detection_count', 0)} times, last: {str(issue.get('last_detected', ''))[:10]})\n"
-        
-        # Check for recent similar investigations
-        recent_investigations = memory_context.get("recent_investigations", [])
-        similar_recent = [inv for inv in recent_investigations 
-                         if inv.get("intent_category") == intent["category"]]
-        
-        if similar_recent:
-            memory_context_str += f"\n📋 RECENT SIMILAR INVESTIGATIONS:\n"
-            for inv in similar_recent[:2]:  # Top 2
-                memory_context_str += f"- {str(inv.get('timestamp', ''))[:10]}: {inv.get('user_query', 'no query')[:40]}...\n"
-        
-        # For database-related questions, use enhanced LLM synthesis
+            for issue in recurring_issues[:3]:
+                memory_context_str += (
+                    f"- {issue.get('collection', 'unknown')}: "
+                    f"{issue.get('recommended_action', 'no action')} "
+                    f"(detected {issue.get('detection_count', 0)} times, "
+                    f"last: {str(issue.get('last_detected', ''))[:10]})\n"
+                )
+
+        recent = memory_context.get("recent_investigations", [])
+        similar = [i for i in recent if i.get("intent_category") == intent["category"]]
+        if similar:
+            memory_context_str += "\n📋 RECENT SIMILAR INVESTIGATIONS:\n"
+            for inv in similar[:2]:
+                memory_context_str += (
+                    f"- {str(inv.get('timestamp', ''))[:10]}: "
+                    f"{inv.get('user_query', 'no query')[:40]}...\n"
+                )
+
         synthesis_prompt = f"""
 You are a MongoDB DBA assistant with memory of past investigations. Provide a response that incorporates historical context.
 
@@ -433,222 +483,172 @@ Guidelines:
 - Reference relevant past investigations or recurring issues
 - If this is a recurring issue, mention when it was last seen
 - Provide specific recommendations based on both current and historical data
-- If recommendations were given before but not implemented, mention that
 - Be helpful and contextual - use the memory to provide better insights
 
 Format your response as conversational text that acknowledges the history while answering the current question.
 """
-
         try:
             response = self.llm.invoke(synthesis_prompt)
             logger.info("Generated memory-aware response")
             return response.strip()
-            
         except Exception as e:
-            logger.error(f"Error generating memory-aware response: {e}")
-            # Fallback to structured output with memory context
-            return self._generate_structured_fallback_with_memory(user_input, tool_results, memory_context)
-    
-    def _generate_structured_fallback_with_memory(self, user_input: str, 
-                                                tool_results: List[Dict[str, Any]], 
-                                                memory_context: Dict[str, Any]) -> str:
-        """Generate a structured fallback response that includes memory context"""
-        output = f"📋 RESPONSE TO: {user_input}\n\n"
-        
-        # Add memory context
-        recurring_count = len(memory_context.get("recurring_issues", []))
-        total_investigations = memory_context.get("total_investigations", 0)
-        
-        if total_investigations > 0:
-            output += f"🧠 MEMORY CONTEXT: {total_investigations} past investigations"
-            if recurring_count > 0:
-                output += f", {recurring_count} recurring unresolved issues"
-            output += "\n\n"
-        
-        # Add current results
+            logger.error("Error generating memory-aware response: %s", e)
+            return self._generate_structured_fallback(user_input, tool_results, memory_context)
+
+    def generate_final_response(
+        self,
+        user_input: str,
+        intent: Dict[str, Any],
+        tool_results: List[Dict[str, Any]],
+        memory_context: Dict[str, Any] = None,
+    ) -> str:
+        return self._generate_memory_aware_response(
+            user_input, intent, tool_results, memory_context or {}
+        )
+
+    def _generate_structured_fallback(
+        self,
+        user_input: str,
+        tool_results: List[Dict[str, Any]],
+        memory_context: Dict[str, Any],
+    ) -> str:
+        out = f"📋 RESPONSE TO: {user_input}\n\n"
+        total = memory_context.get("total_investigations", 0)
+        recurring = len(memory_context.get("recurring_issues", []))
+        if total > 0:
+            out += f"🧠 MEMORY: {total} past investigations"
+            if recurring:
+                out += f", {recurring} recurring issues"
+            out += "\n\n"
+
         for result in tool_results:
             if result.get("success"):
-                tool_name = result.get("tool", "unknown")
-                summary = result.get("summary", "Completed")
-                output += f"✅ {tool_name}: {summary}\n"
-                
-                # Add specific details based on tool type
+                out += f"✅ {result['tool']}: {result.get('summary', 'Completed')}\n"
                 data = result.get("data", {})
-                if tool_name == "list_collections" and data.get("collections"):
-                    output += f"\nCollections in {data.get('database', 'database')}:\n"
-                    for coll in data["collections"]:
-                        if "error" not in coll:
-                            output += f"• {coll['name']}: {coll['count']:,} documents\n"
-                            
-                elif tool_name == "fetch_slow_queries" and data:
-                    output += f"\nSlow queries found:\n"
-                    for i, query in enumerate(data[:3], 1):
-                        output += f"{i}. {query['collection']}: {query['execution_time_ms']}ms\n"
-                        
+                if result["tool"] == "list_collections":
+                    for c in data.get("collections", []):
+                        name = c.get("name", c) if isinstance(c, dict) else c
+                        out += f"  • {name}\n"
+                elif result["tool"] == "fetch_slow_queries":
+                    for q in data[:3]:
+                        out += f"  • {q['collection']}: {q['execution_time_ms']}ms\n"
+                elif result["tool"] == "check_indexes":
+                    out += f"  • {data.get('index_count', 0)} indexes on '{data.get('collection', '')}'\n"
             else:
-                error = result.get("error", "Unknown error")
-                output += f"❌ {result.get('tool', 'tool')}: {error}\n"
-        
-        # Add memory insights
+                out += f"❌ {result.get('tool', 'tool')}: {result.get('error', 'Unknown error')}\n"
+
         if memory_context.get("recurring_issues"):
-            output += f"\n🔄 RECURRING ISSUES:\n"
+            out += "\n🔄 RECURRING ISSUES:\n"
             for issue in memory_context["recurring_issues"][:2]:
-                output += f"• {issue.get('collection', 'unknown')}: seen {issue.get('detection_count', 0)} times\n"
-        
-        return output
-    
-    def generate_final_response(self, user_input: str, intent: Dict[str, Any], 
-                              tool_results: List[Dict[str, Any]], 
-                              memory_context: Dict[str, Any] = None) -> str:
-        """Generate final response using LLM with investigation results and memory"""
-        
-        if memory_context:
-            return self._generate_memory_aware_response(user_input, intent, tool_results, memory_context)
-        else:
-            return self._generate_legacy_response(user_input, intent, tool_results)
-    
-    def _generate_legacy_response(self, user_input: str, intent: Dict[str, Any], 
-                                tool_results: List[Dict[str, Any]]) -> str:
-        """Generate response without memory (fallback)"""
-        
-        if intent["category"] == "DIRECT_ANSWER":
-            return intent.get("suggested_response", 
-                             "I'm a MongoDB DBA assistant. How can I help you with your database?")
-        
-        synthesis_prompt = f"""
-You are a MongoDB DBA assistant providing a final response to the user.
+                out += f"  • {issue.get('collection', 'unknown')}: seen {issue.get('detection_count', 0)} times\n"
+        return out
 
-USER QUESTION: "{user_input}"
-INTENT: {intent["reasoning"]}
+    # ── main entry point ───────────────────────────────────────────────────────
 
-INVESTIGATION RESULTS:
-{json.dumps(tool_results, indent=2)}
-
-Provide a helpful, concise response to the user's question based on the investigation results.
-"""
-
-        try:
-            response = self.llm.invoke(synthesis_prompt)
-            return response.strip()
-        except Exception as e:
-            logger.error(f"Error generating legacy response: {e}")
-            return self._generate_structured_fallback(user_input, tool_results)
-    
-    def _generate_structured_fallback(self, user_input: str, tool_results: List[Dict[str, Any]]) -> str:
-        """Generate a structured fallback response"""
-        output = f"📋 RESPONSE TO: {user_input}\n\n"
-        
-        for result in tool_results:
-            if result.get("success"):
-                tool_name = result.get("tool", "unknown")
-                summary = result.get("summary", "Completed")
-                output += f"✅ {tool_name}: {summary}\n"
-                
-                # Add specific details based on tool type
-                data = result.get("data", {})
-                if tool_name == "list_collections" and data.get("collections"):
-                    output += f"\nCollections in {data.get('database', 'database')}:\n"
-                    for coll in data["collections"]:
-                        if "error" not in coll:
-                            output += f"• {coll['name']}: {coll['count']:,} documents\n"
-                            
-                elif tool_name == "list_databases" and data.get("databases"):
-                    output += f"\nAvailable databases:\n"
-                    for db in data["databases"]:
-                        if "error" not in db:
-                            output += f"• {db['name']}: {db['collections']} collections\n"
-                            
-                elif tool_name == "fetch_slow_queries" and data:
-                    output += f"\nSlow queries found:\n"
-                    for i, query in enumerate(data[:3], 1):  # Show top 3
-                        output += f"{i}. {query['collection']}: {query['execution_time_ms']}ms\n"
-                        
-            else:
-                error = result.get("error", "Unknown error")
-                output += f"❌ {result.get('tool', 'tool')}: {error}\n"
-        
-        return output
-    
     def investigate(self, user_input: str) -> str:
-        """Main investigation with intelligent reasoning and memory"""
-        logger.info(f"Starting memory-enabled investigation for: {user_input}")
+        logger.info("Starting memory-enabled investigation for: %s", user_input)
         start_time = time.time()
-        
+
         try:
-            # Step 1: Get memory context
+            # Step 1: memory context
             memory_context = self.memory.get_investigation_context(user_input, "testdb")
-            logger.info(f"Retrieved memory context: {memory_context.get('total_investigations', 0)} past investigations")
-            
-            # Step 2: Understand user intent with memory context
+            logger.info(
+                "Retrieved memory context: %d past investigations",
+                memory_context.get("total_investigations", 0),
+            )
+
+            # Step 2: intent classification
             intent = self.classify_user_intent(user_input, memory_context)
-            logger.info(f"Intent classification: {intent['category']} (confidence: {intent['confidence']})")
-            
-            # Step 3: Handle direct answers (non-database questions)
+            logger.info(
+                "Intent classification: %s (confidence: %s)",
+                intent["category"],
+                intent["confidence"],
+            )
+
+            # Step 3: direct answers need no database
             if intent["category"] == "DIRECT_ANSWER":
-                investigation_time = time.time() - start_time
-                response = intent.get("suggested_response", "I'm a MongoDB DBA assistant focused on helping with database tasks.")
-                return f"{response}\n\n⏱️  Response time: {investigation_time:.1f} seconds\n💬 Direct response (no database analysis needed)"
-            
-            # Step 4: Check if requires database analysis
+                elapsed = time.time() - start_time
+                response = intent.get(
+                    "suggested_response",
+                    "I'm a MongoDB DBA assistant focused on helping with database tasks.",
+                )
+                return f"{response}\n\n⏱️  Response time: {elapsed:.1f} seconds\n💬 Direct response (no database analysis needed)"
+
             if not intent["requires_database"]:
-                investigation_time = time.time() - start_time
-                return f"I don't think this question requires database analysis. Could you clarify what specific database information you're looking for?\n\n⏱️  Response time: {investigation_time:.1f} seconds"
-            
-            # Step 5: Select appropriate tools with memory awareness
+                elapsed = time.time() - start_time
+                return (
+                    "I don't think this question requires database analysis. "
+                    "Could you clarify what specific database information you're looking for?\n\n"
+                    f"⏱️  Response time: {elapsed:.1f} seconds"
+                )
+
+            # Step 4: tool selection
             investigation_plan = self.select_tools_intelligently(user_input, intent)
-            logger.info(f"Investigation plan: {len(investigation_plan)} steps")
-            
+            logger.info("Investigation plan: %d steps", len(investigation_plan))
+
             if not investigation_plan:
-                investigation_time = time.time() - start_time
-                return f"I'm not sure how to help with that question. Could you be more specific about what database information you need?\n\n⏱️  Response time: {investigation_time:.1f} seconds"
-            
-            # Step 6: Execute investigation plan
+                elapsed = time.time() - start_time
+                return (
+                    "I'm not sure how to help with that question. "
+                    "Could you be more specific about what database information you need?\n\n"
+                    f"⏱️  Response time: {elapsed:.1f} seconds"
+                )
+
+            # Step 5: execute via MCP (one subprocess for entire investigation)
             tool_results = []
-            for step in investigation_plan:
-                tool_name = step.get("tool")
-                parameters = step.get("parameters", {})
-                reasoning = step.get("reasoning", "")
-                
-                logger.info(f"Step {step.get('step', 1)}: {tool_name} - {reasoning}")
-                
-                result = self.execute_tool(tool_name, parameters)
-                tool_results.append(result)
-                
-                # For simple questions, one tool result might be sufficient
-                if len(tool_results) == 1 and intent["category"] == "DATABASE_METADATA":
-                    if result.get("success"):
+            with MCPClient(self._mcp_uri) as mcp:
+                self._mcp = mcp
+                for step in investigation_plan:
+                    tool_name = step.get("tool")
+                    parameters = step.get("parameters", {})
+                    reasoning = step.get("reasoning", "")
+                    logger.info(
+                        "Step %d: %s — %s", step.get("step", 1), tool_name, reasoning
+                    )
+                    result = self.execute_tool(tool_name, parameters)
+                    tool_results.append(result)
+
+                    # Short-circuit for simple metadata questions
+                    if (
+                        len(tool_results) == 1
+                        and intent["category"] == "DATABASE_METADATA"
+                        and result.get("success")
+                    ):
                         break
-            
-            # Step 7: Generate memory-aware response
-            final_response = self.generate_final_response(user_input, intent, tool_results, memory_context)
-            
-            investigation_time = time.time() - start_time
-            
-            # Step 8: Store investigation in memory
-            self._store_investigation_memory(user_input, intent, tool_results, investigation_time, final_response)
-            
-            # Add timing and memory info to response
+                self._mcp = None
+
+            # Step 6: synthesise response with memory
+            final_response = self.generate_final_response(
+                user_input, intent, tool_results, memory_context
+            )
+            elapsed = time.time() - start_time
+
+            # Step 7: persist investigation
+            self._store_investigation_memory(
+                user_input, intent, tool_results, elapsed, final_response
+            )
+
             memory_stats = f"🧠 Memory-enhanced investigation with {len(tool_results)} analysis step(s)"
             if memory_context.get("total_investigations", 0) > 0:
                 memory_stats += f" (building on {memory_context['total_investigations']} past investigations)"
-            
-            final_response += f"\n\n⏱️  Investigation time: {investigation_time:.1f} seconds\n{memory_stats}"
-            
-            return final_response
-            
+
+            return f"{final_response}\n\n⏱️  Investigation time: {elapsed:.1f} seconds\n{memory_stats}"
+
         except Exception as e:
-            investigation_time = time.time() - start_time
-            logger.error(f"Memory-enabled investigation failed: {e}")
-            return f"I encountered an error while investigating your question: {str(e)}\n\n⏱️  Time: {investigation_time:.1f} seconds\n❌ Please try rephrasing your question."
-    
+            elapsed = time.time() - start_time
+            logger.error("Investigation failed: %s", e)
+            return (
+                f"I encountered an error while investigating your question: {e}\n\n"
+                f"⏱️  Time: {elapsed:.1f} seconds\n"
+                "❌ Please try rephrasing your question."
+            )
+
     def get_memory_stats(self) -> Dict[str, Any]:
-        """Get memory statistics for debugging"""
         return self.memory.get_memory_stats()
-    
-    def close(self):
-        """Clean up resources"""
+
+    def close(self) -> None:
         try:
             self.memory.close()
             logger.info("Agent resources cleaned up")
         except Exception as e:
-            logger.error(f"Error during cleanup: {e}")
+            logger.error("Error during cleanup: %s", e)

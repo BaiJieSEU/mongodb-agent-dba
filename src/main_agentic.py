@@ -39,15 +39,19 @@ def test_prerequisites(config, mongo_manager):
         console.print(f"   Error: {e}", style="red")
         return False
     
-    # Test monitored cluster connection
+    # Test MCP server connectivity to the monitored cluster
     try:
-        mongo_manager.test_monitored_cluster_connection()
-        logger.info("Connected to monitored cluster: %s", config.mongodb.monitored_cluster)
-        logger.info("Monitored cluster connection: OK")
+        from utils.mcp_client import MCPClient
+        with MCPClient(config.mongodb.monitored_cluster) as mcp:
+            if not mcp.ping():
+                raise RuntimeError("MCP server returned no tools")
+        logger.info("Connected to monitored cluster via MCP: %s", config.mongodb.monitored_cluster)
+        console.print("✅ MongoDB MCP Server: OK", style="green")
     except Exception as e:
-        console.print(f"❌ Cannot connect to monitored MongoDB cluster", style="red")
+        console.print("❌ Cannot connect to monitored cluster via MCP", style="red")
         console.print(f"   Connection string: {config.mongodb.monitored_cluster}", style="red")
-        console.print(f"   Please ensure MongoDB is running on port 27018", style="red")
+        console.print(f"   Error: {e}", style="red")
+        console.print("   Please ensure MongoDB is running on port 27018", style="red")
         return False
     
     # Test Ollama connection

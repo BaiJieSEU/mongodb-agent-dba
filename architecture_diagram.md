@@ -52,22 +52,25 @@ Memory-enhanced agentic AI system for MongoDB database administration with intel
                                    │
                                    ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                       Database Analysis Tools Layer                    │
+│                       MCP Tool Execution Layer                         │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐  ┌─────────┐│
-│  │SlowQueryFetcher│  │ QueryExplainer │  │ IndexChecker   │  │Metadata ││
-│  │    (Tool)      │  │     (Tool)     │  │     (Tool)     │  │Inspector││
-│  │                │  │                │  │                │  │ (Tool)  ││
-│  │• Profiler data │  │• explain() API │  │• Index coverage│  │• Schema ││
-│  │• Time windows  │  │• Performance   │  │• ESR analysis  │  │• Collections│
-│  │• Deduplication │  │• Execution     │  │• Missing       │  │• Database││
-│  │• Pattern match │  │  statistics    │  │  opportunities │  │  metadata││
-│  │                │  │• Stage analysis│  │                │  │         ││
-│  └────────────────┘  └────────────────┘  └────────────────┘  └─────────┘│
-│         │                     │                     │               │  │
-│         └─────────────────────┼─────────────────────┼───────────────┘  │
-│                               ▼                     ▼                  │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  MCPClient  (src/utils/mcp_client.py)                          │   │
+│  │  • Sync wrapper: background thread + asyncio.run()             │   │
+│  │  • One MCP subprocess per investigation session                │   │
+│  │  • call_tool(name, args)  /  list_tools()                      │   │
+│  └──────────────────┬───────────────────────────────────────────────┘   │
+│                     │ stdio                                             │
+│                     ▼                                                   │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  MongoDB MCP Server  (@mongodb-js/mongodb-mcp-server)          │   │
+│  │  --readOnly  --connectionString mongodb://localhost:27018       │   │
+│  │                                                                 │   │
+│  │  list-collections   list-databases   find (system.profile)     │   │
+│  │  explain            collection-indexes   connect                │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
                                    │
                                    ▼
@@ -160,42 +163,27 @@ LLM reasons about which tools are needed based on:
                    Final Report
 ```
 
-## Tool Architecture
+## MCP Tool Mapping
 
-### SlowQueryFetcher Tool
-```python
-# Analyzes MongoDB profiler data
-• Connects to monitored cluster profiler
-• Applies configurable time windows  
-• Deduplicates similar query patterns
-• Returns structured slow query data
+The agent's logical tools map directly to MongoDB MCP Server operations:
+
+| Agent Tool | MCP Operation | Purpose |
+|---|---|---|
+| `list_collections` | `list-collections` | Collections in a database |
+| `list_databases` | `list-databases` | All available databases |
+| `fetch_slow_queries` | `find` on `system.profile` | Profiler slow query data |
+| `explain_query` | `explain` | Query execution plan |
+| `check_indexes` | `collection-indexes` | Existing indexes on a collection |
+
+The MCP Server runs with `--readOnly` — no writes to the monitored cluster.
+
+### MCPClient Implementation
 ```
-
-### QueryExplainer Tool  
-```python
-# Runs explain() analysis on queries
-• Executes db.collection.explain() 
-• Extracts execution statistics
-• Identifies scan types and efficiency
-• Analyzes query execution stages
-```
-
-### IndexChecker Tool
-```python
-# Analyzes index coverage and optimization
-• Compares queries against existing indexes
-• Applies ESR (Equality, Sort, Range) rules
-• Suggests missing index opportunities  
-• Detects index anti-patterns
-```
-
-### MetadataInspector Tool
-```python
-# Provides database and collection information
-• Retrieves collection statistics
-• Analyzes schema patterns
-• Reports database metadata
-• Supports information queries
+MCPClient(mongodb_uri, read_only=True)
+  • __enter__: spawns MCP subprocess, waits for session ready
+  • call_tool(name, args) → list[str]  (text content blocks)
+  • list_tools() → list[str]
+  • __exit__: sends stop sentinel, joins thread
 ```
 
 ## Memory Enhancement Features
@@ -214,12 +202,15 @@ LLM reasons about which tools are needed based on:
 
 ### Core Technologies
 - **Python 3.11+**: Application runtime
-- **LangChain-Ollama**: LLM integration  
-- **PyMongo**: MongoDB driver
+- **LangChain-Ollama**: LLM integration
+- **mcp**: Python MCP client SDK (`mcp.ClientSession`, `mcp.client.stdio`)
+- **PyMongo**: MongoDB driver (agent memory store only)
 - **QWEN 2.5-coder:7b**: Local LLM for reasoning
 - **Rich**: Console output formatting
 
 ### Infrastructure
+- **MongoDB MCP Server** (`@mongodb-js/mongodb-mcp-server`): All database operations on monitored cluster
+- **Node.js 18+**: Runtime for MongoDB MCP Server
 - **MongoDB 8.0+**: Dual-instance setup (memory + monitored)
 - **Ollama**: Local LLM serving
 - **YAML Configuration**: Flexible system configuration

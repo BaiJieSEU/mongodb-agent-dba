@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 820" font-family="monospace" font-size="13">
+  <!-- Background -->
+  <rect width="760" height="820" fill="#0d1117"/>
+
+  <!-- ── Layer: User Interface ── -->
+  <rect x="20" y="20" width="720" height="80" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+  <text x="380" y="42" fill="#8b949e" text-anchor="middle" font-size="11" font-weight="bold">USER INTERFACE</text>
+  <rect x="280" y="52" width="200" height="36" rx="4" fill="#21262d" stroke="#388bfd" stroke-width="1"/>
+  <text x="380" y="65" fill="#58a6ff" text-anchor="middle" font-size="12" font-weight="bold">main_agentic.py</text>
+  <text x="380" y="80" fill="#8b949e" text-anchor="middle" font-size="10">CLI · Rich console · prerequisites check</text>
+
+  <!-- arrow -->
+  <line x1="380" y1="100" x2="380" y2="128" stroke="#30363d" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ── Layer: AI Agent ── -->
+  <rect x="20" y="130" width="720" height="200" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+  <text x="380" y="152" fill="#8b949e" text-anchor="middle" font-size="11" font-weight="bold">AI AGENT INTELLIGENCE  ·  intelligent_agentic_agent.py</text>
+
+  <!-- Intent -->
+  <rect x="40" y="162" width="148" height="60" rx="4" fill="#21262d" stroke="#3fb950" stroke-width="1"/>
+  <text x="114" y="179" fill="#3fb950" text-anchor="middle" font-size="11" font-weight="bold">Intent</text>
+  <text x="114" y="193" fill="#3fb950" text-anchor="middle" font-size="11" font-weight="bold">Classification</text>
+  <text x="114" y="210" fill="#8b949e" text-anchor="middle" font-size="10">LLM → category</text>
+
+  <!-- Memory Context -->
+  <rect x="204" y="162" width="148" height="60" rx="4" fill="#21262d" stroke="#3fb950" stroke-width="1"/>
+  <text x="278" y="179" fill="#3fb950" text-anchor="middle" font-size="11" font-weight="bold">Memory</text>
+  <text x="278" y="193" fill="#3fb950" text-anchor="middle" font-size="11" font-weight="bold">Context</text>
+  <text x="278" y="210" fill="#8b949e" text-anchor="middle" font-size="10">past investigations</text>
+
+  <!-- Tool Selection -->
+  <rect x="368" y="162" width="148" height="60" rx="4" fill="#21262d" stroke="#3fb950" stroke-width="1"/>
+  <text x="442" y="179" fill="#3fb950" text-anchor="middle" font-size="11" font-weight="bold">Tool</text>
+  <text x="442" y="193" fill="#3fb950" text-anchor="middle" font-size="11" font-weight="bold">Selection</text>
+  <text x="442" y="210" fill="#8b949e" text-anchor="middle" font-size="10">LLM → plan</text>
+
+  <!-- Response Synthesis -->
+  <rect x="532" y="162" width="188" height="60" rx="4" fill="#21262d" stroke="#3fb950" stroke-width="1"/>
+  <text x="626" y="179" fill="#3fb950" text-anchor="middle" font-size="11" font-weight="bold">Response</text>
+  <text x="626" y="193" fill="#3fb950" text-anchor="middle" font-size="11" font-weight="bold">Synthesis</text>
+  <text x="626" y="210" fill="#8b949e" text-anchor="middle" font-size="10">LLM + memory context</text>
+
+  <!-- flow arrows between boxes -->
+  <line x1="188" y1="192" x2="204" y2="192" stroke="#3fb950" stroke-width="1" marker-end="url(#arrg)"/>
+  <line x1="352" y1="192" x2="368" y2="192" stroke="#3fb950" stroke-width="1" marker-end="url(#arrg)"/>
+  <line x1="516" y1="192" x2="532" y2="192" stroke="#3fb950" stroke-width="1" marker-end="url(#arrg)"/>
+
+  <!-- LLM engine box -->
+  <rect x="240" y="252" width="280" height="60" rx="4" fill="#21262d" stroke="#d29922" stroke-width="1"/>
+  <text x="380" y="270" fill="#d29922" text-anchor="middle" font-size="11" font-weight="bold">Ollama LLM Engine</text>
+  <text x="380" y="285" fill="#8b949e" text-anchor="middle" font-size="10">qwen2.5-coder:7b  ·  localhost:11434</text>
+  <text x="380" y="300" fill="#8b949e" text-anchor="middle" font-size="10">intent · planning · synthesis</text>
+
+  <!-- arrows to LLM -->
+  <line x1="114" y1="222" x2="114" y2="282" stroke="#d29922" stroke-width="1" stroke-dasharray="4,2"/>
+  <line x1="114" y1="282" x2="240" y2="282" stroke="#d29922" stroke-width="1" stroke-dasharray="4,2" marker-end="url(#arry)"/>
+  <line x1="442" y1="222" x2="442" y2="282" stroke="#d29922" stroke-width="1" stroke-dasharray="4,2"/>
+  <line x1="442" y1="282" x2="520" y2="282" stroke="#d29922" stroke-width="1" stroke-dasharray="4,2" marker-end="url(#arry)"/>
+
+  <!-- arrow -->
+  <line x1="380" y1="330" x2="380" y2="358" stroke="#30363d" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ── Layer: MCP ── -->
+  <rect x="20" y="360" width="720" height="150" rx="6" fill="#161b22" stroke="#bc8cff" stroke-width="1.5"/>
+  <text x="380" y="382" fill="#bc8cff" text-anchor="middle" font-size="11" font-weight="bold">MCP TOOL EXECUTION  ·  src/utils/mcp_client.py</text>
+
+  <!-- MCPClient -->
+  <rect x="40" y="392" width="200" height="96" rx="4" fill="#21262d" stroke="#bc8cff" stroke-width="1"/>
+  <text x="140" y="410" fill="#bc8cff" text-anchor="middle" font-size="12" font-weight="bold">MCPClient</text>
+  <text x="140" y="426" fill="#8b949e" text-anchor="middle" font-size="10">sync wrapper  ·  thread+queue</text>
+  <text x="140" y="442" fill="#8b949e" text-anchor="middle" font-size="10">call_tool(name, args)</text>
+  <text x="140" y="458" fill="#8b949e" text-anchor="middle" font-size="10">list_tools()</text>
+  <text x="140" y="474" fill="#8b949e" text-anchor="middle" font-size="10">read-only mode</text>
+
+  <!-- arrow -->
+  <line x1="240" y1="440" x2="290" y2="440" stroke="#bc8cff" stroke-width="1.5" marker-end="url(#arrp)"/>
+
+  <!-- MCP Server -->
+  <rect x="290" y="392" width="420" height="96" rx="4" fill="#21262d" stroke="#bc8cff" stroke-width="1"/>
+  <text x="500" y="410" fill="#bc8cff" text-anchor="middle" font-size="12" font-weight="bold">MongoDB MCP Server</text>
+  <text x="500" y="426" fill="#8b949e" text-anchor="middle" font-size="10">@mongodb-js/mongodb-mcp-server  ·  stdio transport</text>
+  <text x="390" y="448" fill="#6e7681" text-anchor="middle" font-size="10">list-collections</text>
+  <text x="390" y="462" fill="#6e7681" text-anchor="middle" font-size="10">list-databases</text>
+  <text x="390" y="476" fill="#6e7681" text-anchor="middle" font-size="10">find (system.profile)</text>
+  <text x="610" y="448" fill="#6e7681" text-anchor="middle" font-size="10">explain</text>
+  <text x="610" y="462" fill="#6e7681" text-anchor="middle" font-size="10">collection-indexes</text>
+  <text x="610" y="476" fill="#6e7681" text-anchor="middle" font-size="10">connect</text>
+
+  <!-- arrow -->
+  <line x1="380" y1="510" x2="380" y2="538" stroke="#30363d" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ── Layer: Data Storage ── -->
+  <rect x="20" y="540" width="720" height="260" rx="6" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
+  <text x="380" y="562" fill="#8b949e" text-anchor="middle" font-size="11" font-weight="bold">DATA STORAGE</text>
+
+  <!-- Agent Memory Store -->
+  <rect x="40" y="572" width="320" height="210" rx="4" fill="#21262d" stroke="#388bfd" stroke-width="1"/>
+  <text x="200" y="592" fill="#388bfd" text-anchor="middle" font-size="12" font-weight="bold">Agent Memory Store</text>
+  <text x="200" y="608" fill="#8b949e" text-anchor="middle" font-size="10">MongoDB  ·  localhost:27017  (rs0)</text>
+  <rect x="60" y="620" width="280" height="146" rx="3" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="200" y="638" fill="#58a6ff" text-anchor="middle" font-size="11" font-weight="bold">agent_memory db</text>
+  <text x="200" y="656" fill="#8b949e" text-anchor="middle" font-size="10">investigations  (TTL 30 days)</text>
+  <text x="200" y="672" fill="#8b949e" text-anchor="middle" font-size="10">performance_issues  (TTL 90 days)</text>
+  <text x="200" y="688" fill="#8b949e" text-anchor="middle" font-size="10">user_context  (no TTL)</text>
+  <text x="200" y="710" fill="#6e7681" text-anchor="middle" font-size="10">─── memory feedback loop ───</text>
+  <text x="200" y="726" fill="#6e7681" text-anchor="middle" font-size="10">patterns · recurring issues · history</text>
+  <text x="200" y="742" fill="#6e7681" text-anchor="middle" font-size="10">AgentMemory class (agent_memory.py)</text>
+
+  <!-- Monitored Cluster -->
+  <rect x="400" y="572" width="320" height="210" rx="4" fill="#21262d" stroke="#f85149" stroke-width="1"/>
+  <text x="560" y="592" fill="#f85149" text-anchor="middle" font-size="12" font-weight="bold">Monitored Cluster</text>
+  <text x="560" y="608" fill="#8b949e" text-anchor="middle" font-size="10">MongoDB  ·  localhost:27018  (rs1)</text>
+  <rect x="420" y="620" width="280" height="146" rx="3" fill="#161b22" stroke="#30363d" stroke-width="1"/>
+  <text x="560" y="638" fill="#ff7b72" text-anchor="middle" font-size="11" font-weight="bold">testdb  (demo)</text>
+  <text x="560" y="656" fill="#8b949e" text-anchor="middle" font-size="10">users  (50 k docs)</text>
+  <text x="560" y="672" fill="#8b949e" text-anchor="middle" font-size="10">products  (5 k docs)</text>
+  <text x="560" y="688" fill="#8b949e" text-anchor="middle" font-size="10">system.profile  (profiler data)</text>
+  <text x="560" y="710" fill="#6e7681" text-anchor="middle" font-size="10">─── read-only access ───</text>
+  <text x="560" y="726" fill="#6e7681" text-anchor="middle" font-size="10">MCP Server enforces --readOnly</text>
+  <text x="560" y="742" fill="#6e7681" text-anchor="middle" font-size="10">no writes to monitored cluster</text>
+
+  <!-- memory feedback arrow -->
+  <path d="M 200 572 L 200 535 L 114 535 L 114 322" stroke="#388bfd" stroke-width="1" stroke-dasharray="4,2" fill="none" marker-end="url(#arrb)"/>
+
+  <!-- MCP to monitored arrow -->
+  <line x1="560" y1="540" x2="560" y2="572" stroke="#f85149" stroke-width="1.5" marker-end="url(#arrr)"/>
+
+  <!-- Arrow marker defs -->
+  <defs>
+    <marker id="arr"  markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#30363d"/>
+    </marker>
+    <marker id="arrg" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#3fb950"/>
+    </marker>
+    <marker id="arry" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#d29922"/>
+    </marker>
+    <marker id="arrp" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#bc8cff"/>
+    </marker>
+    <marker id="arrb" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#388bfd"/>
+    </marker>
+    <marker id="arrr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L8,3 z" fill="#f85149"/>
+    </marker>
+  </defs>
+</svg>
