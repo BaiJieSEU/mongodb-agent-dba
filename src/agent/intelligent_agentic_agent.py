@@ -288,7 +288,10 @@ Guidelines:
         blocks = self._mcp.call_tool("find", {
             "database": db,
             "collection": "system.profile",
-            "filter": {"millis": {"$gte": threshold_ms}},
+            "filter": {
+                "millis": {"$gte": threshold_ms},
+                "op": {"$nin": ["getmore", "killCursors"]},
+            },
             "sort": {"ts": -1},
             "limit": limit,
         })

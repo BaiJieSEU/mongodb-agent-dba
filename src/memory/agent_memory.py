@@ -172,17 +172,17 @@ class AgentMemory:
             
             # Try to update existing issue, or insert new one
             issue_dict = issue.to_dict()
-            # Remove detection_count from $set to avoid conflict
-            if "detection_count" in issue_dict:
-                del issue_dict["detection_count"]
-                
+            # Remove fields that belong to other operators to avoid path conflicts
+            first_detected = issue_dict.pop("first_detected", issue.first_detected)
+            issue_dict.pop("detection_count", None)
+
             result = self.performance_issues.update_one(
                 {"query_hash": issue.query_hash},
                 {
                     "$set": issue_dict,
                     "$inc": {"detection_count": 1},
                     "$setOnInsert": {
-                        "first_detected": issue.first_detected
+                        "first_detected": first_detected
                     }
                 },
                 upsert=True
