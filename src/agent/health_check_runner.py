@@ -88,15 +88,16 @@ class HealthCheckRunner:
             sections.append(self._section_server_health())                   # BL-001
             sections.append(self._section_replication_health())              # BL-002
             sections.append(self._section_storage_stats(user_dbs))          # BL-003
-            perf_section, slow_queries = self._section_query_performance()
+            perf_section, slow_queries = self._section_query_performance(user_dbs)
             sections.append(perf_section)
             top_colls = self._top_slow_collections(slow_queries, n=3)
             sections.append(self._section_index_health(top_colls))
-            sections.append(self._section_index_usage(user_dbs))             # BL-004
+            usage_section, unused_indexes = self._section_index_usage(user_dbs)  # BL-004
+            sections.append(usage_section)
 
             self._mcp = None
 
-        recommendations = self._build_recommendations(slow_queries, sections)
+        recommendations = self._build_recommendations(slow_queries, sections, unused_indexes)
         overall = worst_severity([s.severity for s in sections])
 
         report = HealthCheckReport(
@@ -419,34 +420,34 @@ class HealthCheckRunner:
 
     # ── Section 5: Query Performance ───────────────────────────────────────────
 
-    def _section_query_performance(self) -> Tuple[ReportSection, List[Dict[str, Any]]]:
+    def _section_query_performance(self, user_dbs: List[str]) -> Tuple[ReportSection, List[Dict[str, Any]]]:
         threshold = self.config.agent.slow_query_threshold_ms
         limit     = self.config.agent.max_queries_to_analyze
 
-        # TODO (BL-050): iterate all user databases; hard-coded to testdb for now
-        blocks = self._mcp.call_tool("find", {
-            "database": "testdb",
-            "collection": "system.profile",
-            "filter": {
-                "millis": {"$gte": threshold},
-                "op": {"$nin": ["getmore", "killCursors"]},
-            },
-            "sort": {"ts": -1},
-            "limit": limit,
-        })
-
         slow_queries: List[Dict[str, Any]] = []
-        for doc in self._parse_json_docs(blocks):
-            ns = doc.get("ns", "")
-            collection = ns.split(".", 1)[-1] if "." in ns else ns
-            slow_queries.append({
-                "collection": collection,
-                "query":      doc.get("query", doc.get("command", {})),
-                "execution_time_ms": doc.get("millis", 0),
-                "docs_examined":     doc.get("docsExamined", 0),
-                "docs_returned":     doc.get("nreturned", 0),
-                "operation":         doc.get("op", "query"),
+        for db in user_dbs:
+            blocks = self._mcp.call_tool("find", {
+                "database": db,
+                "collection": "system.profile",
+                "filter": {
+                    "millis": {"$gte": threshold},
+                    "op": {"$nin": ["getmore", "killCursors"]},
+                },
+                "sort": {"ts": -1},
+                "limit": limit,
             })
+            for doc in self._parse_json_docs(blocks):
+                ns = doc.get("ns", "")
+                db_name, collection = ns.split(".", 1) if "." in ns else (db, ns)
+                slow_queries.append({
+                    "db":         db_name,
+                    "collection": collection,
+                    "query":      doc.get("query", doc.get("command", {})),
+                    "execution_time_ms": doc.get("millis", 0),
+                    "docs_examined":     doc.get("docsExamined", 0),
+                    "docs_returned":     doc.get("nreturned", 0),
+                    "operation":         doc.get("op", "query"),
+                })
 
         count  = len(slow_queries)
         max_ms = max((q["execution_time_ms"] for q in slow_queries), default=0)
@@ -492,38 +493,48 @@ class HealthCheckRunner:
 
     # ── Section 6: Index Health ─────────────────────────────────────────────────
 
-    def _section_index_health(self, collections: List[str]) -> ReportSection:
+    def _section_index_health(self, collections: List[Dict[str, str]]) -> ReportSection:
+        """collections: [{"db": "...", "collection": "..."}] from _top_slow_collections."""
         if not collections:
             return ReportSection(
-                name="Index Health",
+                name="Missing Indexes",
                 severity=HealthSeverity.OK,
                 signals=[Signal("collections_checked", 0, "collections")],
                 findings=["No slow-query collections to analyse."],
             )
 
+        # index_data keyed by "db.collection" for display
         index_data: Dict[str, List[str]] = {}
-        for coll in collections:
+        for item in collections:
+            db, coll = item["db"], item["collection"]
             blocks = self._mcp.call_tool("collection-indexes", {
-                "database": "testdb", "collection": coll,
+                "database": db, "collection": coll,
             })
-            index_data[coll] = [b for b in blocks if b.startswith("Field:")]
+            index_data[f"{db}.{coll}"] = [b for b in blocks if b.startswith("Field:")]
 
-        under_indexed = [c for c, idx in index_data.items() if len(idx) <= 1]
+        under_indexed = [fq for fq, idx in index_data.items() if len(idx) <= 1]
+        ok_count = len(collections) - len(under_indexed)
         severity = HealthSeverity.CRITICAL if under_indexed else HealthSeverity.OK
 
         findings: List[str] = []
-        for coll, indexes in index_data.items():
-            findings.append(f"  {coll}: {len(indexes)} index(es)")
-            for idx in indexes:
-                findings.append(f"    {idx}")
         if under_indexed:
             findings.append(
-                f"Under-indexed: {', '.join(under_indexed)} — "
-                f"only _id index present despite appearing in slow query log."
+                f"{len(under_indexed)} of {len(collections)} slow-query collection(s) have no "
+                f"custom indexes — every field query causes a full collection scan."
+            )
+            for fq_coll in under_indexed:
+                findings.append(
+                    f'  Collection "{fq_coll}": only _id present — add indexes for queried fields.'
+                )
+            if ok_count:
+                findings.append(f"{ok_count} collection(s) have adequate indexes.")
+        else:
+            findings.append(
+                f"All {len(collections)} slow-query collection(s) have custom indexes in place."
             )
 
         return ReportSection(
-            name="Index Health",
+            name="Missing Indexes",
             severity=severity,
             signals=[
                 Signal("collections_checked",       len(collections),    "collections"),
@@ -534,7 +545,7 @@ class HealthCheckRunner:
 
     # ── Section 7: Index Usage (BL-004) ────────────────────────────────────────
 
-    def _section_index_usage(self, user_dbs: List[str]) -> ReportSection:
+    def _section_index_usage(self, user_dbs: List[str]) -> Tuple[ReportSection, List[Dict[str, Any]]]:
         """aggregate $indexStats — ops count per index since last mongod restart."""
         all_indexes: List[Dict[str, Any]] = []
 
@@ -568,31 +579,41 @@ class HealthCheckRunner:
 
         unused = [i for i in all_indexes if i["ops"] == 0 and not i["is_id"]]
         used   = [i for i in all_indexes if i["ops"] > 0]
+        custom = [i for i in all_indexes if not i["is_id"]]
         severity = HealthSeverity.WARNING if unused else HealthSeverity.OK
 
-        findings = [
-            f"{len(all_indexes)} total index(es) across "
-            f"{len({i['collection'] for i in all_indexes})} collection(s)."
-        ]
+        findings: List[str] = []
         if unused:
-            findings.append(f"{len(unused)} unused index(es) (0 ops since restart):")
-            for idx in unused:
+            findings.append(
+                f"{len(unused)} of {len(custom)} custom index(es) have never been used since "
+                f"last restart — they add write overhead and storage cost with no read benefit."
+            )
+            _CAP = 10
+            for idx in unused[:_CAP]:
                 findings.append(
-                    f"  {idx['db']}.{idx['collection']}.{idx['name']}  key={idx['key']}  since {idx['since']}"
+                    f'  {idx["db"]}.{idx["collection"]} → "{idx["name"]}"  since {idx["since"]}'
                 )
-            findings.append("Consider dropping unused indexes to reduce write overhead and storage.")
+            if len(unused) > _CAP:
+                findings.append(f"  … and {len(unused) - _CAP} more unused index(es).")
+            findings.append(
+                "Review with the app team before dropping — confirm no seasonal or batch queries."
+            )
         else:
-            findings.append("All non-_id indexes have been used since last restart.")
+            findings.append(
+                f"All {len(custom)} custom index(es) across "
+                f"{len({i['collection'] for i in all_indexes})} collection(s) are actively used."
+            )
 
         if used:
-            findings.append(f"{len(used)} index(es) with recorded usage:")
-            for idx in sorted(used, key=lambda x: -x["ops"])[:5]:
-                findings.append(
-                    f"  {idx['collection']}.{idx['name']}: {idx['ops']:,} ops"
+            top = sorted(used, key=lambda x: -x["ops"])[:3]
+            findings.append(
+                "Most-used: " + ", ".join(
+                    f'{i["collection"]}.{i["name"]} ({i["ops"]:,} ops)' for i in top
                 )
+            )
 
         return ReportSection(
-            name="Index Usage",
+            name="Unused Indexes",
             severity=severity,
             signals=[
                 Signal("total_indexes",  len(all_indexes), "indexes"),
@@ -600,68 +621,133 @@ class HealthCheckRunner:
                 Signal("used_indexes",   len(used),        "indexes"),
             ],
             findings=findings,
-        )
+        ), unused
 
     # ── helpers ────────────────────────────────────────────────────────────────
 
-    def _top_slow_collections(self, slow_queries: List[Dict], n: int = 3) -> List[str]:
-        counts: Dict[str, int] = {}
+    def _top_slow_collections(self, slow_queries: List[Dict], n: int = 3) -> List[Dict[str, str]]:
+        """Return top-N collections by slow query count as [{"db": ..., "collection": ...}]."""
+        counts: Dict[tuple, int] = {}
         for q in slow_queries:
             c = q["collection"]
             if c and not c.startswith("system."):
-                counts[c] = counts.get(c, 0) + 1
-        return [c for c, _ in sorted(counts.items(), key=lambda x: -x[1])[:n]]
+                key = (q.get("db", ""), c)
+                counts[key] = counts.get(key, 0) + 1
+        top = sorted(counts.items(), key=lambda x: -x[1])[:n]
+        return [{"db": db, "collection": coll} for (db, coll), _ in top]
+
+    # Fields that appear in the profiler command document but are NOT filter fields
+    _SKIP_FIELDS = frozenset({
+        "find", "filter", "limit", "sort", "skip", "projection",
+        "aggregate", "pipeline", "cursor", "collation",
+        "readConcern", "writeConcern", "lsid", "txnNumber", "$db",
+        "allowDiskUse", "batchSize", "singleBatch", "returnKey",
+        "showRecordId", "hint", "comment", "maxTimeMS",
+    })
+
+    @staticmethod
+    def _extract_filter_fields(query_obj: Any) -> List[str]:
+        """Return non-operator field names from a profiler command/query dict."""
+        if not isinstance(query_obj, dict):
+            return []
+        # Profiler wraps find queries as {find:..., filter:{...}, ...}
+        filter_obj = query_obj.get("filter", query_obj.get("query", query_obj))
+        if not isinstance(filter_obj, dict):
+            return []
+        return [
+            f for f in filter_obj
+            if not f.startswith("$") and f not in HealthCheckRunner._SKIP_FIELDS
+        ]
 
     def _build_recommendations(
         self,
         slow_queries: List[Dict[str, Any]],
         sections: List[ReportSection],
+        unused_indexes: List[Dict[str, Any]],
     ) -> List[Recommendation]:
         recs: List[Recommendation] = []
-        seen: set = set()
 
+        # ── HIGH: create missing indexes for slow full-scan collections ──────────
+        # Group all slow queries by collection so we can pick the best representative
+        # (prefer queries that have extractable filter fields — aggregate $indexStats
+        #  calls appear as op=command with no filter and must be skipped)
+        by_coll: Dict[str, List[Dict]] = {}
         for q in slow_queries:
             coll = q["collection"]
-            if coll in seen or not coll or coll.startswith("system."):
-                continue
-            seen.add(coll)
+            if coll and not coll.startswith("system."):
+                by_coll.setdefault(coll, []).append(q)
 
-            examined   = q.get("docs_examined", 0)
-            returned   = q.get("docs_returned", 0)
-            ms         = q.get("execution_time_ms", 0)
+        for coll, qs in by_coll.items():
+            # Pick the worst full-scan query (most docs examined) that has filter fields;
+            # fall back to worst overall if none have extractable fields.
+            full_scan_qs = [
+                q for q in qs
+                if (q.get("docs_examined", 0) >= _THRESHOLDS["full_scan_examined_min"]
+                    and (q.get("docs_returned", 0) / q["docs_examined"]
+                         if q.get("docs_examined") else 1.0)
+                    <= _THRESHOLDS["full_scan_selectivity_max"])
+            ]
+            if not full_scan_qs:
+                continue  # no full-scan evidence for this collection
+
+            # Prefer a query with extractable filter fields
+            best = None
+            best_fields: List[str] = []
+            for q in sorted(full_scan_qs, key=lambda x: -x.get("docs_examined", 0)):
+                fields = self._extract_filter_fields(q.get("query", {}))
+                if fields:
+                    best        = q
+                    best_fields = fields
+                    break
+            if best is None:
+                best = max(full_scan_qs, key=lambda x: x.get("docs_examined", 0))
+
+            examined    = best.get("docs_examined", 0)
+            returned    = best.get("docs_returned", 0)
+            ms          = best.get("execution_time_ms", 0)
             selectivity = returned / examined if examined else 1.0
 
-            if (examined < _THRESHOLDS["full_scan_examined_min"]
-                    or selectivity > _THRESHOLDS["full_scan_selectivity_max"]):
-                continue
+            # Derive the database from slow_queries ns field if available, else "testdb"
+            db_label = best.get("db", "testdb")
+            fq_coll  = f"{db_label}.{coll}"
 
-            query_obj = q.get("query", {})
-            if isinstance(query_obj, dict):
-                filter_obj   = query_obj.get("filter", query_obj.get("query", query_obj))
-                filter_fields = [
-                    f for f in (filter_obj.keys() if isinstance(filter_obj, dict) else [])
-                    if not f.startswith("$") and f not in ("find", "filter", "limit", "sort")
-                ]
-            else:
-                filter_fields = []
-
-            if filter_fields:
-                index_spec = ", ".join(f'"{f}": 1' for f in filter_fields[:2])
+            if best_fields:
+                index_spec = ", ".join(f'"{f}": 1' for f in best_fields[:2])
                 action     = f"db.{coll}.createIndex({{{index_spec}}})"
                 confidence = "high"
             else:
-                action     = f"Identify filter fields on {coll} and create a covering index"
+                action     = (
+                    f"db.{coll}.createIndex({{\"<field>\": 1}})  "
+                    f"— inspect query patterns to identify filter fields"
+                )
                 confidence = "medium"
 
             recs.append(Recommendation(
                 priority="high",
-                collection=coll,
+                collection=fq_coll,
                 action=action,
                 evidence=(
                     f"{examined:,} docs examined, {returned} returned ({ms}ms) — "
                     f"selectivity {selectivity:.4f}, likely full collection scan"
                 ),
                 confidence=confidence,
+            ))
+
+        # ── MEDIUM: drop unused indexes (structured data from _section_index_usage) ──
+        for idx in unused_indexes:
+            db_name    = idx["db"]
+            coll_name  = idx["collection"]
+            index_name = idx["name"]
+            since      = idx.get("since", "last restart") or "last restart"
+            recs.append(Recommendation(
+                priority="medium",
+                collection=f"{db_name}.{coll_name}",
+                action=f'db.{coll_name}.dropIndex("{index_name}")',
+                evidence=(
+                    f'Index "{index_name}" on {db_name}.{coll_name} has 0 accesses since {since} — '
+                    f"consuming write overhead and storage with no read benefit"
+                ),
+                confidence="medium",
             ))
 
         return recs

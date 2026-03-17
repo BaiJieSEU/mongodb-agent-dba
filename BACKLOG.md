@@ -1,6 +1,6 @@
 # MongoDB DBA Agent — Product Backlog
 
-Updated: 2026-03-17 | Format: Epic → Story → Acceptance criteria
+Updated: 2026-03-17 (v0.3.0) | Format: Epic → Story → Acceptance criteria
 
 Priority: **P0** = must-have for health-check goal | **P1** = high value | **P2** = medium | **P3** = nice-to-have
 Size: **S** < 1 day | **M** 1–3 days | **L** 3–7 days | **XL** > 7 days
@@ -22,10 +22,12 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-021 | Baseline-aware severity assessment | P0 | M | 3 | 🔲 |
 | BL-071 | Environment variable + secret config | P0 | S | 8 | 🔲 |
 | BL-032 | LangChain multi-LLM backend | P0 | M | 4 | 🔲 |
-| BL-010 | Health check pipeline | P0 | L | 2 | 🔲 |
+| BL-010 | Health check pipeline | P0 | L | 2 | ✅ Done |
 | BL-011 | Configurable scheduler | P0 | L | 2 | 🔲 |
 | BL-030 | Structured tool output (typed) | P0 | L | 4 | 🔲 |
 | BL-070 | Docker Compose deployment | P0 | L | 8 | 🔲 |
+| BL-009 | Operations health section (serverStatus metrics) | P1 | M | 1 | 🔲 |
+| BL-013 | Connection pool health section | P1 | M | 1 | 🔲 |
 | BL-005 | Current operations tool | P1 | S | 1 | 🔲 |
 | BL-006 | Profiler configuration check | P1 | S | 1 | 🔲 |
 | BL-007 | Duplicate/redundant index detection | P1 | S | 1 | 🔲 |
@@ -37,7 +39,7 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-031 | Automatic tool parameter chaining | P1 | M | 4 | 🔲 |
 | BL-060 | HTML report output | P1 | M | 7 | ✅ Done |
 | BL-073 | Secret management integration | P1 | M | 8 | 🔲 |
-| BL-050 | Multi-cluster support | P1 | L | 6 | 🔲 |
+| BL-050 | Multi-cluster support | P1 | L | 6 | 🔶 Partial |
 | BL-033 | ESR index order validation | P2 | S | 4 | 🔲 |
 | BL-041 | Approval-gated profiler config | P2 | S | 5 | 🔲 |
 | BL-052 | Immutable audit trail | P2 | S | 6 | 🔲 |
@@ -49,17 +51,71 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
 | BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
 
-**Done:** 5 items (BL-020, BL-001, BL-002, BL-003, BL-004)
-**P0:** 7 remaining — foundation for health-check goal + customer deployment
-**P1:** 13 items — high-value once P0 is in place
+**Done:** 7 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010)
+**Partial:** 1 item (BL-050 — within-cluster multi-DB discovery done; multi-cluster registration pending)
+**P0:** 6 remaining — scheduler, baseline severity, typed output, multi-LLM, Docker, env vars
+**P1:** 14 items — high-value once P0 is in place
 **P2–P3:** 10 items — important but not blocking
-**Total:** 35 items across 8 epics (5 done, 30 remaining)
+**Total:** 37 items across 8 epics (7 done, 1 partial, 29 remaining)
 
 ---
 
 ## Epic 1 — Complete Cluster Health Check (Read-Only Signals)
 
 *Goal: cover all six health-check dimensions defined in REQUIREMENTS.md §2*
+
+---
+
+### BL-009 · Operations health section
+**Priority:** P1 | **Size:** M
+
+**Story:** As a DBA, I want an Operations section in the health check report showing
+throughput, lock wait time, and WiredTiger cache stats so I can spot performance
+degradation between index and profiler data.
+
+**Metrics to collect:**
+- Reads/sec, writes/sec, getmore rate
+- Lock wait time (avg ms per op)
+- WiredTiger cache hit rate, bytes in cache, eviction rate
+- Page faults and memory (RSS)
+
+**Blocker:** `serverStatus` is not accessible via the current read-only MCP interface.
+
+**Options to unblock:**
+- Option A: Direct PyMongo read from monitored cluster (read-only, admin db) — needs
+  security review since it bypasses MCP read-only enforcement
+- Option B: Atlas Data API integration (see BL-053) — Atlas clusters only
+- Option C: Wait for MCP server to expose `runCommand` in read-only mode
+
+**Acceptance criteria:**
+- Operations section renders in the HTML report between Index Analysis and Replication
+- Removes the "NOT AVAILABLE" placeholder for `#sec-ops`
+- Signals: `reads_per_sec`, `writes_per_sec`, `lock_wait_ms`, `cache_hit_pct`
+- Severity WARNING if cache hit rate < 80% or lock wait > 20ms
+
+---
+
+### BL-013 · Connection pool health section
+**Priority:** P1 | **Size:** M
+
+**Story:** As a DBA, I want a Connections section showing current vs max connections
+and per-client breakdown so I can detect connection leaks and pool exhaustion before
+they cause 503s.
+
+**Metrics to collect:**
+- Current connections, max connections, available headroom
+- Connection creation rate and average connection age
+- Per-client service breakdown (if available)
+- Connections waiting for a lock
+
+**Blocker:** Connection stats require `db.serverStatus().connections` which is not
+accessible via the current read-only MCP interface (same blocker as BL-009).
+
+**Acceptance criteria:**
+- Connections section renders in the HTML report between Replication and Storage
+- Removes the "NOT AVAILABLE" placeholder for `#sec-connections`
+- Signals: `current_connections`, `max_connections`, `connection_utilisation_pct`
+- Severity WARNING if utilisation > 70%, CRITICAL if > 90%
 
 ---
 
@@ -383,11 +439,18 @@ reviewing the zero-usage evidence.
 
 ### BL-050 · Multi-cluster support
 **Priority:** P1 | **Size:** L
+**Status:** 🔶 Partial — within-cluster multi-database discovery is done; multi-cluster registration is not.
 
 **Story:** As a DBA managing more than one MongoDB cluster, I want to run a health
 check against any registered cluster by name so I don't need to edit config files.
 
-**Acceptance criteria:**
+**Done (v0.3.0):**
+- `_section_query_performance` iterates all user databases discovered via `list-databases` —
+  no database name is hardcoded. Deploy to any cluster; all databases are picked up automatically.
+- `_top_slow_collections` returns `{"db", "collection"}` dicts so the correct database is used
+  in §6 index checks regardless of which database a slow query came from.
+
+**Remaining:**
 - `monitored_clusters` list in config replaces single `monitored_cluster` URI
 - Each cluster has a `name`, `uri`, and optional `tags` (e.g. `production`, `staging`)
 - CLI accepts `--cluster <name>` flag
@@ -615,6 +678,19 @@ installation guide.
 ## ✅ Done
 
 Items completed and shipped.
+
+---
+
+### BL-010 · Health check pipeline
+**Priority:** P0 | **Size:** L | **Epic:** 2
+
+`src/agent/health_check_runner.py` — `HealthCheckRunner`. Fixed 7-section pipeline:
+Cluster Overview → Server Health → Replication Health → Storage & Capacity →
+Query Performance → Missing Indexes → Unused Indexes. Each section produces
+`ok / warning / critical` severity; overall severity derived from worst section.
+Outputs machine-readable JSON + self-contained HTML to `reports/`. Section names:
+"Missing Indexes" (formerly "Index Health") and "Unused Indexes" (formerly "Index Usage").
+Note: storing the run in `agent_memory` is deferred to BL-012 (trend comparison).
 
 ---
 

@@ -6,7 +6,8 @@
 > structured report with findings and recommendations, and run on a configurable schedule.
 
 Current version covers: cluster overview, server health, replication health, storage &
-capacity, query performance, index health, index usage. JSON + HTML reports produced
+capacity, query performance, missing indexes, unused indexes. Dynamically discovers all
+databases in the cluster — no hardcoded database names. JSON + HTML reports produced
 on every run. Next P0 items: scheduler (BL-011), baseline-aware severity (BL-021),
 typed tool output (BL-030), LangChain multi-LLM backend (BL-032).
 See [REQUIREMENTS.md](REQUIREMENTS.md) and [BACKLOG.md](BACKLOG.md).
@@ -88,9 +89,21 @@ Produces a `HealthCheckReport` saved as both JSON and HTML to `reports/`.
 | 2 | Server Health | `find` on `local.startup_log`, `db-stats` (admin) | BL-001 ✅ |
 | 3 | Replication Health | `find` on `local.system.replset`, `local.oplog.rs` | BL-002 ✅ |
 | 4 | Storage & Capacity | `db-stats`, `collection-storage-size`, `count` | BL-003 ✅ |
-| 5 | Query Performance | `find` on `system.profile` | — |
-| 6 | Index Health | `collection-indexes` on top slow collections | — |
-| 7 | Index Usage | `aggregate $indexStats` | BL-004 ✅ |
+| 5 | Query Performance | `find` on `<db>.system.profile` for **every discovered database** | — |
+| 6 | Missing Indexes | `collection-indexes` on top slow collections (any db) | — |
+| 7 | Unused Indexes | `aggregate $indexStats` per collection across all databases | BL-004 ✅ |
+
+**Key design invariants:**
+- Sections 5–7 iterate `user_dbs` (discovered at runtime via `list-databases`); no database
+  name is hardcoded anywhere in the pipeline.
+- `_section_query_performance(user_dbs)` — queries `system.profile` in each discovered db.
+- `_top_slow_collections(slow_queries)` — returns `[{"db": ..., "collection": ...}]` dicts
+  so the database is carried through to §6 without re-discovery.
+- `_section_index_usage(user_dbs)` — returns `(ReportSection, List[Dict])` tuple; the second
+  element is the structured unused-index list passed directly to `_build_recommendations`.
+- `_build_recommendations(slow_queries, sections, unused_indexes)` — consumes structured data;
+  no string-parsing of finding lines. Iterates all slow queries per collection to find the
+  best representative with extractable filter fields (skips aggregate-only profiler entries).
 
 **MCP availability constraints** (confirmed; no workaround possible via read-only MCP):
 - `serverStatus` → not available; workaround: `local.startup_log` + `db-stats`
@@ -107,7 +120,10 @@ Produces a `HealthCheckReport` saved as both JSON and HTML to `reports/`.
 
 **HTML report** — `src/utils/html_reporter.py`:
 - `render_html(report) -> str` — pure Python, zero new dependencies
-- Dark-theme self-contained HTML; overall severity banner, section cards, recommendations table
+- Dark-theme self-contained HTML; grouped sidebar nav (Overview / Performance / Reliability /
+  Action), overall severity banner, section cards, recommendations table with `createIndex` /
+  `dropIndex` scripts
+- Placeholder sections for Operations (BL-009) and Connections (BL-013) — marked "NOT AVAILABLE"
 - ~10 KB output; written alongside JSON as `reports/health_YYYY-MM-DD_HH-MM-SS.html`
 
 ---
@@ -175,7 +191,7 @@ mongodb-agent-dba/
 ├── BACKLOG.md                            # Prioritised roadmap (35 items, 8 epics)
 ├── requirements.txt                      # Python dependencies (pip)
 ├── README.md                             # User-facing documentation
-├── create_demo_scenario.py               # Generates test data + slow profiler entries
+├── create_demo_scenario.py               # Generates testdb (5 colls) + testUATdb (2 colls) with slow queries
 └── CLAUDE.md                             # Development reference (this file)
 ```
 
@@ -193,8 +209,11 @@ python3 -c "
 import pymongo
 client = pymongo.MongoClient('mongodb://localhost:27018/')
 db = client['testdb']
-print('users:', db.users.count_documents({}))
-print('slow queries (>=5ms):', db['system.profile'].count_documents({'millis': {'\$gte': 5}}))
+print('testdb users:', db.users.count_documents({}))
+print('testdb slow queries (>=5ms):', db['system.profile'].count_documents({'millis': {'\$gte': 5}}))
+db2 = client['testUATdb']
+print('testUATdb inventory:', db2.inventory.count_documents({}))
+print('testUATdb slow queries (>=5ms):', db2['system.profile'].count_documents({'millis': {'\$gte': 5}}))
 "
 ```
 
@@ -268,7 +287,7 @@ source venv/bin/activate && python src/main_agentic.py "my database is slow"
 | No slow queries found | Run `python create_demo_scenario.py`; profiler must be level 1, `slowms ≤ 5` |
 | Memory not persisting | Check `agent_memory` database on port 27017; verify TTL indexes exist |
 | `first_detected` conflict | Ensure `agent_memory.py` pops `first_detected` from `$set` before upsert |
-| LLM returns invalid JSON | Retry; if persistent, switch model — `qwen3:8b` recommended over `qwen2.5-coder:7b` |
+| LLM returns invalid JSON | Retry; if persistent, switch model in `config/agent_config.yaml` — `qwen3:8b` is the active model |
 | HTML report not opening | Run `open $(ls -t reports/*.html | head -1)` from project root |
 
 ---
@@ -277,7 +296,7 @@ source venv/bin/activate && python src/main_agentic.py "my database is slow"
 
 | Layer | Technology |
 |---|---|
-| LLM reasoning | Ollama + `qwen3:8b` (recommended) or `qwen2.5-coder:7b`; multi-provider via BL-032 |
+| LLM reasoning | Ollama + `qwen3:8b` (active model in config); multi-provider via BL-032 |
 | DB tool execution | `@mongodb-js/mongodb-mcp-server` (Node 18+), read-only |
 | MCP client | Python `mcp` SDK (`mcp[cli]>=1.0.0`) |
 | Agent memory store | PyMongo + MongoDB 8.0 (port 27017) |
