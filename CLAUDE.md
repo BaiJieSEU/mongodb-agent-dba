@@ -5,8 +5,10 @@
 > The agent must perform a comprehensive MongoDB cluster health check, produce a
 > structured report with findings and recommendations, and run on a configurable schedule.
 
-Current version (v0.2.0) covers query performance and index analysis only.
-The P0 backlog items (BL-001 to BL-030) close the gap to a full health check.
+Current version covers: cluster overview, server health, replication health, storage &
+capacity, query performance, index health, index usage. JSON + HTML reports produced
+on every run. Next P0 items: scheduler (BL-011), baseline-aware severity (BL-021),
+typed tool output (BL-030), LangChain multi-LLM backend (BL-032).
 See [REQUIREMENTS.md](REQUIREMENTS.md) and [BACKLOG.md](BACKLOG.md).
 
 ---
@@ -29,25 +31,39 @@ See [REQUIREMENTS.md](REQUIREMENTS.md) and [BACKLOG.md](BACKLOG.md).
 ## Development Rules
 
 - Never claim success without running an end-to-end test
-- After every change: `source venv/bin/activate && python src/main_agentic.py "my database is slow"`
-- LLM reasoning must drive tool selection — no hardcoded if/else workflows
+- After every change to the agentic path: `source venv/bin/activate && python src/main_agentic.py "my database is slow"`
+- After every change to the health check path: `source venv/bin/activate && python src/main_agentic.py --health-check`
+- LLM reasoning must drive tool selection in the agentic path — no hardcoded if/else workflows
+- The health check pipeline (`HealthCheckRunner`) is deterministic — no LLM, fixed section order
 - MCP client is read-only; never add direct PyMongo writes to the monitored cluster
-- All new health-check signals must go through a new `_tool_*` method → MCPClient
+- All new health-check signals must go through `HealthCheckRunner` section methods → `MCPClient`
+- New signals added to a section must also add a `Signal` to that section's `signals` list
 
 ---
 
-## Current Implementation (v0.2.0)
+## Current Implementation
 
-### Core Agent
+### Two Execution Paths
+
+```
+python src/main_agentic.py "my database is slow"     → Agentic path (LLM-driven)
+python src/main_agentic.py --health-check            → Health check path (deterministic)
+```
+
+`main_agentic.py` routes to one of the two based on the `--health-check` flag or
+keyword detection (`health check`, `cluster health`, etc.).
+
+---
+
+### Path 1 — Agentic Investigation
+
 **`src/agent/intelligent_agentic_agent.py`** — `IntelligentAgenticDBAAgent`
 
 - Intent classification → `DIRECT_ANSWER | DATABASE_METADATA | PERFORMANCE_ANALYSIS | COMPLEX_INVESTIGATION`
 - Tool selection → LLM produces an ordered investigation plan with parameters
-- Tool execution → all DB calls delegated to `MCPClient` (no direct PyMongo to monitored cluster)
+- Tool execution → all DB calls delegated to `MCPClient`
 - Response synthesis → LLM with memory context injected
 - Investigation storage → `AgentMemory.store_investigation()` + `store_performance_issue()`
-
-### MCP Tool Dispatch
 
 | Agent method | MCP tool | Filter / notes |
 |---|---|---|
@@ -57,43 +73,76 @@ See [REQUIREMENTS.md](REQUIREMENTS.md) and [BACKLOG.md](BACKLOG.md).
 | `_tool_explain_query` | `explain` | find execution plan |
 | `_tool_check_indexes` | `collection-indexes` | per collection |
 
+---
+
+### Path 2 — Deterministic Health Check
+
+**`src/agent/health_check_runner.py`** — `HealthCheckRunner`
+
+No LLM involved. Fixed 7-section pipeline executed in order inside one `MCPClient` session.
+Produces a `HealthCheckReport` saved as both JSON and HTML to `reports/`.
+
+| # | Section | MCP tools used | Backlog |
+|---|---|---|---|
+| 1 | Cluster Overview | `list-databases`, `list-collections` | — |
+| 2 | Server Health | `find` on `local.startup_log`, `db-stats` (admin) | BL-001 ✅ |
+| 3 | Replication Health | `find` on `local.system.replset`, `local.oplog.rs` | BL-002 ✅ |
+| 4 | Storage & Capacity | `db-stats`, `collection-storage-size`, `count` | BL-003 ✅ |
+| 5 | Query Performance | `find` on `system.profile` | — |
+| 6 | Index Health | `collection-indexes` on top slow collections | — |
+| 7 | Index Usage | `aggregate $indexStats` | BL-004 ✅ |
+
+**MCP availability constraints** (confirmed; no workaround possible via read-only MCP):
+- `serverStatus` → not available; workaround: `local.startup_log` + `db-stats`
+- `replSetGetStatus` → not available; workaround: `local.system.replset` + `local.oplog.rs`
+- Connections, memory (RSS), page faults, per-member replication lag → not obtainable
+
+**Report models** — `src/models/health_check_report.py`:
+- `HealthSeverity`: `ok | warning | critical`
+- `Signal(name, value, unit, threshold)`
+- `ReportSection(name, severity, signals, findings)`
+- `Recommendation(priority, collection, action, evidence, confidence)`
+- `HealthCheckReport(run_id, timestamp, cluster_uri, overall_severity, sections, recommendations)`
+- `worst_severity(severities)` — derives overall from section list
+
+**HTML report** — `src/utils/html_reporter.py`:
+- `render_html(report) -> str` — pure Python, zero new dependencies
+- Dark-theme self-contained HTML; overall severity banner, section cards, recommendations table
+- ~10 KB output; written alongside JSON as `reports/health_YYYY-MM-DD_HH-MM-SS.html`
+
+---
+
 ### MCP Client
+
 **`src/utils/mcp_client.py`** — `MCPClient`
 
 - Sync context manager; background thread + `asyncio.run()` (anyio compatibility)
-- One MCP subprocess per `investigate()` call; `--readOnly` enforced
+- One MCP subprocess per `investigate()` / `run()` call; `--readOnly` enforced
 - `call_tool(name, args) → list[str]` (text content blocks from MCP response)
 
+---
+
 ### Memory System
+
 **`src/memory/agent_memory.py`** — `AgentMemory`
 
 - `agent_memory` database on port 27017
 - `investigations` (TTL 30d), `performance_issues` (TTL 90d), `user_context` (no TTL)
 - Upsert rule: `first_detected` in `$setOnInsert` only; `detection_count` via `$inc`
-  (both must be popped from `$set` dict before the update — see v0.2.0 bug fix)
+  (both must be popped from `$set` dict before the update — prevents MongoDB path conflict)
 
 ---
 
-## What Is Missing for the Health Check Goal
+## What Is Still Missing (P0)
 
-The table below maps REQUIREMENTS.md §2 gaps to backlog items. These are the next
-things to build, in priority order.
-
-| Missing signal | Backlog item | How to add |
+| Gap | Backlog item | Notes |
 |---|---|---|
-| Server stats (connections, memory, locks) | BL-001 (P0) | New `_tool_get_server_status` → MCP `runCommand serverStatus` |
-| Replication lag, member states | BL-002 (P0) | New `_tool_get_replication_status` → MCP `runCommand replSetGetStatus` |
-| Collection sizes, storage stats | BL-003 (P0) | New `_tool_get_collection_stats` → MCP `runCommand collStats` |
-| Index usage (unused indexes) | BL-004 (P0) | New `_tool_get_index_stats` → MCP `aggregate $indexStats` |
-| Health check pipeline | BL-010 (P0) | New `health_check()` method; fixed tool execution order; per-section severity |
-| Scheduler | BL-011 (P0) | APScheduler or `schedule` lib; `--daemon` CLI flag |
-| Structured JSON report | BL-020 (P0) | Typed report schema; written to `reports/` directory |
-| Severity thresholds config | BL-021 (P0) | New `health_check.thresholds` section in `agent_config.yaml` |
-| Typed tool output (no string parsing) | BL-030 (P0) | Replace string-split parsing with dataclasses; LLM gets clean JSON |
-| Current operations | BL-005 (P1) | New `_tool_get_current_operations` → MCP `runCommand currentOp` |
-| Profiler config check | BL-006 (P1) | Read `getProfilingStatus` at investigation start |
-| Duplicate/redundant index detection | BL-007 (P1) | Derive from existing `collection-indexes` output |
-| Aggregation pipeline analysis | BL-008 (P1) | Extend `_tool_explain_query` to handle `aggregate` op |
+| Scheduler | BL-011 (P0/L) | APScheduler or `schedule` lib; `--daemon` CLI flag |
+| Baseline-aware severity | BL-021 (P0/M) | Compare metrics to cluster's own history, not static thresholds; hard safety limits as constants |
+| Typed tool output | BL-030 (P0/L) | Replace string-parsing with dataclasses; LLM gets clean JSON |
+| Multi-LLM support | BL-032 (P0/M) | LangChain abstraction: Azure OpenAI, Bedrock, Anthropic API, Ollama |
+| Docker deployment | BL-070 (P0/L) | `.env.example`, one `docker compose up` |
+| Env var config | BL-071 (P0/S) | All config overridable via `AGENT_*` env vars |
 
 ---
 
@@ -103,28 +152,31 @@ things to build, in priority order.
 mongodb-agent-dba/
 ├── src/
 │   ├── agent/
-│   │   └── intelligent_agentic_agent.py  # Core AI agent + MCP dispatch
+│   │   ├── health_check_runner.py        # Deterministic 7-section health check pipeline
+│   │   └── intelligent_agentic_agent.py  # LLM-driven agentic investigation
 │   ├── memory/
 │   │   ├── __init__.py
 │   │   └── agent_memory.py               # MongoDB-based persistent memory
 │   ├── models/
-│   │   └── query_models.py               # Pydantic data structures
+│   │   ├── health_check_report.py        # Typed report schema (BL-020)
+│   │   └── query_models.py               # Pydantic models (agentic path)
 │   ├── utils/
+│   │   ├── html_reporter.py              # Self-contained HTML report renderer (BL-060)
 │   │   ├── mcp_client.py                 # Sync wrapper around MongoDB MCP Server
 │   │   ├── mongodb_client.py             # Agent store connection (PyMongo)
-│   │   └── config_loader.py             # YAML config loader
-│   └── main_agentic.py                   # CLI entry point
+│   │   └── config_loader.py              # YAML config loader
+│   └── main_agentic.py                   # CLI entry point; routes to agentic or health check
 ├── config/
-│   └── agent_config.yaml                # Runtime configuration
-├── architecture.svg                     # Architecture diagram (dark-mode SVG)
-├── architecture_diagram.md              # Architecture narrative
-├── CHANGELOG.md                         # Version history
-├── REQUIREMENTS.md                      # Product scope + honest capability assessment
-├── BACKLOG.md                           # Prioritised roadmap (26 items, 6 epics)
-├── requirements.txt                     # Python dependencies (pip)
-├── README.md                            # User-facing documentation
-├── create_demo_scenario.py              # Generates test data + slow profiler entries
-└── CLAUDE.md                           # Development reference (this file)
+│   └── agent_config.yaml                 # Runtime configuration
+├── reports/                              # JSON + HTML health check output (auto-created)
+├── architecture.svg                      # Architecture diagram
+├── CHANGELOG.md                          # Version history
+├── REQUIREMENTS.md                       # Product scope + honest capability assessment
+├── BACKLOG.md                            # Prioritised roadmap (35 items, 8 epics)
+├── requirements.txt                      # Python dependencies (pip)
+├── README.md                             # User-facing documentation
+├── create_demo_scenario.py               # Generates test data + slow profiler entries
+└── CLAUDE.md                             # Development reference (this file)
 ```
 
 ---
@@ -150,26 +202,33 @@ If `system.profile` is empty, run `python create_demo_scenario.py`.
 
 ### Test Cases
 
-1. **Performance investigation** — should call `fetch_slow_queries` + `check_indexes` + `explain_query`:
+1. **Health check** — all 7 sections, JSON + HTML output:
+   ```bash
+   source venv/bin/activate && python src/main_agentic.py --health-check
+   open $(ls -t reports/*.html | head -1)
+   ```
+   Expected: 7 sections, `reports/health_*.json` and `reports/health_*.html` written
+
+2. **Performance investigation** — should call `fetch_slow_queries` + `check_indexes` + `explain_query`:
    ```bash
    source venv/bin/activate && python src/main_agentic.py "my database is slow"
    ```
    Expected: identifies missing email index on `users`, no errors in log
 
-2. **Metadata query** — should call `list_collections` only:
+3. **Metadata query** — should call `list_collections` only:
    ```bash
    python src/main_agentic.py "how many collections do I have"
    ```
    Expected: `DATABASE_METADATA` intent, one MCP tool call
 
-3. **Memory continuity** — second run should reference first:
+4. **Memory continuity** — second run should reference first:
    ```bash
    python src/main_agentic.py "check slow queries"
    python src/main_agentic.py "is the users collection still slow?"
    ```
    Expected: second response mentions prior investigation date
 
-4. **Direct answer** — no MCP session should open:
+5. **Direct answer** — no MCP session should open:
    ```bash
    python src/main_agentic.py "what's your name"
    ```
@@ -188,7 +247,13 @@ mongod --config ~/mongodb/config/mongod2.conf --fork   # port 27018
 # Generate test data + slow profiler entries
 source venv/bin/activate && python create_demo_scenario.py
 
-# Run agent
+# Run health check (produces JSON + HTML report)
+source venv/bin/activate && python src/main_agentic.py --health-check
+
+# Open latest HTML report
+open $(ls -t reports/*.html | head -1)
+
+# Run agentic investigation
 source venv/bin/activate && python src/main_agentic.py "my database is slow"
 ```
 
@@ -203,7 +268,8 @@ source venv/bin/activate && python src/main_agentic.py "my database is slow"
 | No slow queries found | Run `python create_demo_scenario.py`; profiler must be level 1, `slowms ≤ 5` |
 | Memory not persisting | Check `agent_memory` database on port 27017; verify TTL indexes exist |
 | `first_detected` conflict | Ensure `agent_memory.py` pops `first_detected` from `$set` before upsert |
-| LLM returns invalid JSON | Retry; if persistent, consider switching model (see BL-032) |
+| LLM returns invalid JSON | Retry; if persistent, switch model — `qwen3:8b` recommended over `qwen2.5-coder:7b` |
+| HTML report not opening | Run `open $(ls -t reports/*.html | head -1)` from project root |
 
 ---
 
@@ -211,9 +277,10 @@ source venv/bin/activate && python src/main_agentic.py "my database is slow"
 
 | Layer | Technology |
 |---|---|
-| LLM reasoning | Ollama + `qwen2.5-coder:7b` (swap via BL-032) |
+| LLM reasoning | Ollama + `qwen3:8b` (recommended) or `qwen2.5-coder:7b`; multi-provider via BL-032 |
 | DB tool execution | `@mongodb-js/mongodb-mcp-server` (Node 18+), read-only |
 | MCP client | Python `mcp` SDK (`mcp[cli]>=1.0.0`) |
 | Agent memory store | PyMongo + MongoDB 8.0 (port 27017) |
-| CLI / output | Python `rich` |
+| Report output | JSON + self-contained HTML (`src/utils/html_reporter.py`) |
+| CLI / console output | Python `rich` |
 | Config | PyYAML |
