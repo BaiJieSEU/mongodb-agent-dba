@@ -756,6 +756,7 @@ class HealthCheckRunner:
 
     def _save_report(self, report: HealthCheckReport) -> Path:
         from utils.html_reporter import render_html
+        from utils.markdown_reporter import render_markdown
 
         REPORTS_DIR.mkdir(exist_ok=True)
         stem = f"health_{report.timestamp.strftime('%Y-%m-%d_%H-%M-%S')}"
@@ -764,11 +765,16 @@ class HealthCheckRunner:
         json_path.write_text(json.dumps(report.to_dict(), indent=2, default=str))
         logger.info("Health check report saved: %s", json_path)
 
-        # Set report_path before rendering HTML so the footer shows the correct path
+        # Set report_path before rendering HTML/Markdown so the footer is correct
         report.report_path = str(json_path)
+
         html_path = REPORTS_DIR / f"{stem}.html"
         html_path.write_text(render_html(report), encoding="utf-8")
         logger.info("HTML report saved: %s", html_path)
+
+        md_path = REPORTS_DIR / f"{stem}.md"
+        md_path.write_text(render_markdown(report), encoding="utf-8")
+        logger.info("Markdown report saved: %s", md_path)
 
         return json_path
 

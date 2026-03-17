@@ -6,11 +6,10 @@ import json
 import hashlib
 from datetime import datetime
 from typing import Dict, Any, List, Optional
-from langchain_ollama import OllamaLLM
-
 from utils.mongodb_client import MongoDBManager
 from utils.config_loader import AppConfig
 from utils.mcp_client import MCPClient
+from utils.llm_factory import build_llm
 from memory.agent_memory import AgentMemory, Investigation, PerformanceIssue
 
 logger = logging.getLogger(__name__)
@@ -23,12 +22,8 @@ class IntelligentAgenticDBAAgent:
         self.config = config
         self.mongo_manager = mongo_manager
 
-        # LLM
-        self.llm = OllamaLLM(
-            base_url=config.ollama.base_url,
-            model=config.ollama.model,
-            temperature=0.1,
-        )
+        # LLM — provider selected by config.llm.provider (or AGENT_LLM_PROVIDER env var)
+        self.llm = build_llm(config)
 
         # Memory (agent store on port 27017)
         self.memory = AgentMemory(

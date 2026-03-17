@@ -144,13 +144,12 @@ def test_prerequisites(config, mongo_manager):
         return False
 
     try:
-        from langchain_ollama import OllamaLLM
-        llm = OllamaLLM(base_url=config.ollama.base_url, model=config.ollama.model)
+        from utils.llm_factory import build_llm
+        llm = build_llm(config)
         llm.invoke("test")
-        console.print("✅ Ollama connection: OK", style="green")
+        console.print(f"✅ LLM ({config.llm.provider}): OK", style="green")
     except Exception as e:
-        console.print(f"❌ Cannot connect to Ollama", style="red")
-        console.print(f"   URL: {config.ollama.base_url}  Model: {config.ollama.model}", style="red")
+        console.print(f"❌ LLM provider '{config.llm.provider}' failed", style="red")
         console.print(f"   Error: {e}", style="red")
         return False
 

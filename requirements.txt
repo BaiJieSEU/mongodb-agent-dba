@@ -1,5 +1,6 @@
 pymongo>=4.5.0
 langchain>=0.1.0
+langchain-core>=0.1.0
 langchain-ollama>=0.1.0
 pydantic>=2.0.0
 rich>=13.0.0
@@ -8,3 +9,8 @@ python-dotenv>=1.0.0
 pytest>=7.0.0
 faker>=19.0.0
 mcp[cli]>=1.0.0
+
+# Optional LLM providers — install only what your deployment needs:
+# pip install langchain-anthropic        # Anthropic API
+# pip install langchain-openai           # Azure OpenAI
+# pip install langchain-aws              # AWS Bedrock

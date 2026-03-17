@@ -20,8 +20,8 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-003 | Collection storage stats tool | P0 | M | 1 | ✅ Done |
 | BL-004 | Index usage statistics tool | P0 | M | 1 | ✅ Done |
 | BL-021 | Baseline-aware severity assessment | P0 | M | 3 | 🔲 |
-| BL-071 | Environment variable + secret config | P0 | S | 8 | 🔲 |
-| BL-032 | LangChain multi-LLM backend | P0 | M | 4 | 🔲 |
+| BL-071 | Environment variable + secret config | P0 | S | 8 | 🔶 Partial |
+| BL-032 | LangChain multi-LLM backend | P0 | M | 4 | ✅ Done |
 | BL-010 | Health check pipeline | P0 | L | 2 | ✅ Done |
 | BL-011 | Configurable scheduler | P0 | L | 2 | 🔲 |
 | BL-030 | Structured tool output (typed) | P0 | L | 4 | 🔲 |
@@ -31,7 +31,7 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-005 | Current operations tool | P1 | S | 1 | 🔲 |
 | BL-006 | Profiler configuration check | P1 | S | 1 | 🔲 |
 | BL-007 | Duplicate/redundant index detection | P1 | S | 1 | 🔲 |
-| BL-023 | Confidence scoring on recommendations | P1 | S | 3 | 🔲 |
+| BL-023 | Confidence scoring on recommendations | P1 | S | 3 | ✅ Done |
 | BL-074 | PS delivery runbook (< 30 min) | P1 | S | 8 | 🔲 |
 | BL-008 | Aggregation pipeline analysis | P1 | M | 1 | 🔲 |
 | BL-012 | Trend comparison in scheduled runs | P1 | M | 2 | 🔲 |
@@ -43,7 +43,7 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-033 | ESR index order validation | P2 | S | 4 | 🔲 |
 | BL-041 | Approval-gated profiler config | P2 | S | 5 | 🔲 |
 | BL-052 | Immutable audit trail | P2 | S | 6 | 🔲 |
-| BL-061 | Markdown report output | P2 | S | 7 | 🔲 |
+| BL-061 | Markdown report output | P2 | S | 7 | ✅ Done |
 | BL-075 | Data sovereignty mode | P2 | S | 8 | 🔲 |
 | BL-072 | Non-Docker quickstart script | P2 | M | 8 | 🔲 |
 | BL-040 | Approval-gated index creation | P2 | L | 5 | 🔲 |
@@ -51,12 +51,12 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
 | BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
 
-**Done:** 7 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010)
-**Partial:** 1 item (BL-050 — within-cluster multi-DB discovery done; multi-cluster registration pending)
-**P0:** 6 remaining — scheduler, baseline severity, typed output, multi-LLM, Docker, env vars
-**P1:** 14 items — high-value once P0 is in place
-**P2–P3:** 10 items — important but not blocking
-**Total:** 37 items across 8 epics (7 done, 1 partial, 29 remaining)
+**Done:** 11 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-010)
+**Partial:** 2 items (BL-050 — within-cluster multi-DB done; BL-071 — LLM+MongoDB env vars done, full coverage pending)
+**P0:** 4 remaining — scheduler (BL-011), baseline severity (BL-021), typed output (BL-030), Docker (BL-070)
+**P1:** 13 items — high-value once P0 is in place
+**P2–P3:** 9 items — important but not blocking
+**Total:** 37 items across 8 epics (11 done, 2 partial, 24 remaining)
 
 ---
 
@@ -678,6 +678,41 @@ installation guide.
 ## ✅ Done
 
 Items completed and shipped.
+
+---
+
+### BL-032 · LangChain multi-LLM backend
+**Priority:** P0 | **Size:** M | **Epic:** 4
+
+`src/utils/llm_factory.py` — `build_llm(config) -> Runnable[str, str]` factory using LCEL
+`llm | StrOutputParser()` so all providers expose a uniform string-in/string-out interface.
+Supported providers: `ollama` (default), `anthropic`, `azure_openai`, `bedrock`.
+Provider selected by `llm.provider` in `agent_config.yaml` or `AGENT_LLM_PROVIDER` env var.
+Credentials only from environment variables — never from YAML.
+Optional provider packages (`langchain-anthropic`, `langchain-openai`, `langchain-aws`)
+imported lazily with clear error messages if not installed.
+`IntelligentAgenticDBAAgent` updated to use `build_llm(config)`. Prerequisites check is now
+provider-aware. `.env.example` committed with all variable names and descriptions.
+
+---
+
+### BL-061 · Markdown report output
+**Priority:** P2 | **Size:** S | **Epic:** 7
+
+`src/utils/markdown_reporter.py` — `render_markdown(report) -> str`. Standard CommonMark.
+Sections as `##` headings with severity emoji (✅ ⚠️ ❌). Signals as Markdown table.
+Indented findings as blockquotes. Recommendations as numbered list with bold action line.
+Written alongside JSON and HTML as `reports/health_YYYY-MM-DD_HH-MM-SS.md`.
+
+---
+
+### BL-023 · Confidence scoring on recommendations
+**Priority:** P1 | **Size:** S | **Epic:** 3
+
+`Recommendation.confidence` field (`high | medium | low`) in typed model. `createIndex`
+recommendations set `high` when filter fields are extracted from profiler data, `medium`
+when they cannot be determined. Drop-index recommendations are `medium`. Displayed in
+Rich console, HTML report, and Markdown report.
 
 ---
 

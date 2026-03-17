@@ -1,20 +1,44 @@
 mongodb:
   agent_store: "mongodb://localhost:27017"
   monitored_cluster: "mongodb://localhost:27018"
-  
-ollama:
-  base_url: "http://localhost:11434"
-  model: "qwen3:8b"
-  
+
+llm:
+  # Active provider: ollama | anthropic | azure_openai | bedrock
+  # Override at runtime: AGENT_LLM_PROVIDER=anthropic
+  provider: "ollama"
+
+  ollama:
+    base_url: "http://localhost:11434"
+    model: "qwen3:8b"
+    temperature: 0.1
+
+  anthropic:
+    # Credentials: AGENT_ANTHROPIC_API_KEY (or ANTHROPIC_API_KEY)
+    model: "claude-sonnet-4-6"
+    temperature: 0.1
+
+  azure_openai:
+    # Credentials: AGENT_AZURE_OPENAI_KEY (or AZURE_OPENAI_API_KEY)
+    endpoint: ""          # e.g. https://my-resource.openai.azure.com/
+    deployment: ""        # e.g. gpt-4o
+    api_version: "2024-02-15-preview"
+    temperature: 0.1
+
+  bedrock:
+    # Credentials: standard AWS env vars (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
+    model_id: "anthropic.claude-3-sonnet-20240229-v1:0"
+    region: "us-east-1"
+    temperature: 0.1
+
 agent:
   slow_query_threshold_ms: 5
   max_queries_to_analyze: 10
   investigation_timeout: 60
-  
+
 logging:
   level: "INFO"
   format: "json"
-  
+
 demo:
   users_count: 100000
   products_count: 10000

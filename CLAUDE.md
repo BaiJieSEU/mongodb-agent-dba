@@ -9,7 +9,7 @@ Current version covers: cluster overview, server health, replication health, sto
 capacity, query performance, missing indexes, unused indexes. Dynamically discovers all
 databases in the cluster — no hardcoded database names. JSON + HTML reports produced
 on every run. Next P0 items: scheduler (BL-011), baseline-aware severity (BL-021),
-typed tool output (BL-030), LangChain multi-LLM backend (BL-032).
+typed tool output (BL-030), Docker deployment (BL-070).
 See [REQUIREMENTS.md](REQUIREMENTS.md) and [BACKLOG.md](BACKLOG.md).
 
 ---
@@ -118,6 +118,12 @@ Produces a `HealthCheckReport` saved as both JSON and HTML to `reports/`.
 - `HealthCheckReport(run_id, timestamp, cluster_uri, overall_severity, sections, recommendations)`
 - `worst_severity(severities)` — derives overall from section list
 
+**Markdown report** — `src/utils/markdown_reporter.py`:
+- `render_markdown(report) -> str` — standard CommonMark, no external dependencies
+- Sections as `##` headings with emoji prefix (✅ ⚠️ ❌); signals as Markdown table;
+  recommendations as numbered list with bold action line
+- Written alongside JSON and HTML as `reports/health_YYYY-MM-DD_HH-MM-SS.md`
+
 **HTML report** — `src/utils/html_reporter.py`:
 - `render_html(report) -> str` — pure Python, zero new dependencies
 - Dark-theme self-contained HTML; grouped sidebar nav (Overview / Performance / Reliability /
@@ -154,11 +160,10 @@ Produces a `HealthCheckReport` saved as both JSON and HTML to `reports/`.
 | Gap | Backlog item | Notes |
 |---|---|---|
 | Scheduler | BL-011 (P0/L) | APScheduler or `schedule` lib; `--daemon` CLI flag |
-| Baseline-aware severity | BL-021 (P0/M) | Compare metrics to cluster's own history, not static thresholds; hard safety limits as constants |
+| Baseline-aware severity | BL-021 (P0/M) | Compare metrics to cluster's own history, not static thresholds |
 | Typed tool output | BL-030 (P0/L) | Replace string-parsing with dataclasses; LLM gets clean JSON |
-| Multi-LLM support | BL-032 (P0/M) | LangChain abstraction: Azure OpenAI, Bedrock, Anthropic API, Ollama |
-| Docker deployment | BL-070 (P0/L) | `.env.example`, one `docker compose up` |
-| Env var config | BL-071 (P0/S) | All config overridable via `AGENT_*` env vars |
+| Docker deployment | BL-070 (P0/L) | `docker compose up` — Python + Node + MongoDB + optional Ollama |
+| Env var config (full) | BL-071 (P0/S, partial) | LLM + MongoDB vars done; schedule/threshold vars pending |
 
 ---
 
@@ -296,7 +301,7 @@ source venv/bin/activate && python src/main_agentic.py "my database is slow"
 
 | Layer | Technology |
 |---|---|
-| LLM reasoning | Ollama + `qwen3:8b` (active model in config); multi-provider via BL-032 |
+| LLM reasoning | `src/utils/llm_factory.py` — Ollama (default), Anthropic, Azure OpenAI, Bedrock; provider set via `llm.provider` or `AGENT_LLM_PROVIDER` env var |
 | DB tool execution | `@mongodb-js/mongodb-mcp-server` (Node 18+), read-only |
 | MCP client | Python `mcp` SDK (`mcp[cli]>=1.0.0`) |
 | Agent memory store | PyMongo + MongoDB 8.0 (port 27017) |
