@@ -35,7 +35,7 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-012 | Trend comparison in scheduled runs | P1 | M | 2 | 🔲 |
 | BL-022 | Webhook / notification output | P1 | M | 3 | 🔲 |
 | BL-031 | Automatic tool parameter chaining | P1 | M | 4 | 🔲 |
-| BL-060 | HTML report output | P1 | M | 7 | 🔲 |
+| BL-060 | HTML report output | P1 | M | 7 | ✅ Done |
 | BL-073 | Secret management integration | P1 | M | 8 | 🔲 |
 | BL-050 | Multi-cluster support | P1 | L | 6 | 🔲 |
 | BL-033 | ESR index order validation | P2 | S | 4 | 🔲 |
@@ -446,30 +446,6 @@ Advisor recommendations).
 
 ---
 
-### BL-060 · HTML report output
-**Priority:** P1 | **Size:** M
-
-**Story:** As a DBA, I want each health check to also produce a self-contained HTML
-file so I can open it in any browser, email it, or share it via a file share without
-needing a terminal, Rich, or any Python installed on the recipient's machine.
-
-**Why this matters:**
-The current Rich console output and JSON file are useful for developers but not for
-managers, auditors, or teammates on Windows/macOS who don't have the agent installed.
-An HTML file works everywhere with zero dependencies.
-
-**Acceptance criteria:**
-- `HealthCheckRunner` writes `reports/health_YYYY-MM-DD_HH-MM-SS.html` alongside the JSON
-- HTML is fully self-contained — all CSS inline, no external CDN or font requests
-- Matches the structure of the console report: header, per-section cards, recommendations table
-- Severity colours consistent with console (green / amber / red)
-- Overall severity shown as a banner at the top
-- Renders correctly in Chrome, Firefox, Safari, and Edge
-- File size < 100 KB for a typical 3-section report (no heavy frameworks)
-- `--no-html` CLI flag to suppress HTML output for scripted / scheduled runs
-
----
-
 ### BL-061 · Markdown report output
 **Priority:** P2 | **Size:** S
 
@@ -639,6 +615,16 @@ installation guide.
 ## ✅ Done
 
 Items completed and shipped.
+
+---
+
+### BL-060 · HTML report output
+**Priority:** P1 | **Size:** M | **Epic:** 7
+
+`src/utils/html_reporter.py` — pure Python, zero new dependencies. Dark-theme
+self-contained HTML with overall severity banner, per-section cards (signals table +
+findings), and recommendations table. Written alongside the JSON file in `reports/`.
+Output: ~10 KB per report (well under 100 KB target).
 
 ---
 

@@ -672,16 +672,27 @@ class HealthCheckRunner:
     # ── persistence ────────────────────────────────────────────────────────────
 
     def _save_report(self, report: HealthCheckReport) -> Path:
+        from utils.html_reporter import render_html
+
         REPORTS_DIR.mkdir(exist_ok=True)
-        filename = f"health_{report.timestamp.strftime('%Y-%m-%d_%H-%M-%S')}.json"
-        path = REPORTS_DIR / filename
-        path.write_text(json.dumps(report.to_dict(), indent=2, default=str))
-        logger.info("Health check report saved: %s", path)
-        return path
+        stem = f"health_{report.timestamp.strftime('%Y-%m-%d_%H-%M-%S')}"
+
+        json_path = REPORTS_DIR / f"{stem}.json"
+        json_path.write_text(json.dumps(report.to_dict(), indent=2, default=str))
+        logger.info("Health check report saved: %s", json_path)
+
+        # Set report_path before rendering HTML so the footer shows the correct path
+        report.report_path = str(json_path)
+        html_path = REPORTS_DIR / f"{stem}.html"
+        html_path.write_text(render_html(report), encoding="utf-8")
+        logger.info("HTML report saved: %s", html_path)
+
+        return json_path
 
     def _purge_old_reports(self, days: int = 90) -> None:
         cutoff = datetime.utcnow() - timedelta(days=days)
-        for f in REPORTS_DIR.glob("health_*.json"):
-            if datetime.fromtimestamp(f.stat().st_mtime) < cutoff:
-                f.unlink()
-                logger.info("Purged old report: %s", f)
+        for pattern in ("health_*.json", "health_*.html"):
+            for f in REPORTS_DIR.glob(pattern):
+                if datetime.fromtimestamp(f.stat().st_mtime) < cutoff:
+                    f.unlink()
+                    logger.info("Purged old report: %s", f)
