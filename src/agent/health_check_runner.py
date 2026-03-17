@@ -239,13 +239,13 @@ class HealthCheckRunner:
 
         findings = [
             f"MongoDB {version}  ·  host: {hostname}  ·  uptime: {uptime_hours}h",
-            f"Disk: {disk_used_gb} GB used of {disk_total_gb} GB ({disk_used_pct}%)",
-            "Not available via MCP: active connections, memory (RSS), page faults, lock stats.",
+            f"Filesystem disk: {disk_used_gb} GB used of {disk_total_gb} GB ({disk_used_pct}%)"
+            f" — this is total machine disk, not MongoDB data size.",
         ]
         if disk_used_pct >= _THRESHOLDS["disk_used_pct_warning"]:
             findings.append(
-                f"Disk usage at {disk_used_pct}% — "
-                f"{'CRITICAL' if disk_used_pct >= _THRESHOLDS['disk_used_pct_critical'] else 'WARNING'}."
+                f"Filesystem disk at {disk_used_pct}% — "
+                f"{'CRITICAL: risk of write failures.' if disk_used_pct >= _THRESHOLDS['disk_used_pct_critical'] else 'WARNING: monitor closely.'}"
             )
 
         return ReportSection(
@@ -254,8 +254,8 @@ class HealthCheckRunner:
             signals=[
                 Signal("mongodb_version", version),
                 Signal("uptime_hours", uptime_hours, "hours"),
-                Signal("disk_used_gb", disk_used_gb, "GB"),
-                Signal("disk_used_pct", disk_used_pct, "%", _THRESHOLDS["disk_used_pct_warning"]),
+                Signal("filesystem_disk_used_gb", disk_used_gb, "GB"),
+                Signal("filesystem_disk_used_pct", disk_used_pct, "%", _THRESHOLDS["disk_used_pct_warning"]),
             ],
             findings=findings,
         )
@@ -390,17 +390,13 @@ class HealthCheckRunner:
 
         coll_stats.sort(key=lambda x: -x["size_mb"])
 
-        if disk_used_pct >= _THRESHOLDS["disk_used_pct_critical"]:
-            severity = HealthSeverity.CRITICAL
-        elif disk_used_pct >= _THRESHOLDS["disk_used_pct_warning"]:
-            severity = HealthSeverity.WARNING
-        else:
-            severity = HealthSeverity.OK
+        # Severity based on MongoDB data size, not filesystem (filesystem is in Server Health)
+        severity = HealthSeverity.OK
 
         findings = [
-            f"Data size: {total_data_mb:.1f} MB  ·  Index size: {total_index_mb:.1f} MB  "
-            f"·  Disk used: {disk_used_pct}%",
-            "Collections (largest first):",
+            f"MongoDB data: {total_data_mb:.1f} MB  ·  Indexes: {total_index_mb:.1f} MB"
+            f"  ·  {len(coll_stats)} collection(s) analysed",
+            "Collections by size (largest first):",
         ]
         for s in coll_stats[:5]:
             findings.append(
@@ -412,9 +408,8 @@ class HealthCheckRunner:
             name="Storage & Capacity",
             severity=severity,
             signals=[
-                Signal("total_data_mb",   round(total_data_mb, 1),   "MB"),
-                Signal("total_index_mb",  round(total_index_mb, 1),  "MB"),
-                Signal("disk_used_pct",   disk_used_pct, "%", _THRESHOLDS["disk_used_pct_warning"]),
+                Signal("mongodb_data_mb",  round(total_data_mb, 1),  "MB"),
+                Signal("mongodb_index_mb", round(total_index_mb, 1), "MB"),
                 Signal("collections_analysed", len(coll_stats), "collections"),
             ],
             findings=findings,
