@@ -239,13 +239,15 @@ class HealthCheckRunner:
 
         findings = [
             f"MongoDB {version}  ·  host: {hostname}  ·  uptime: {uptime_hours}h",
-            f"Filesystem disk: {disk_used_gb} GB used of {disk_total_gb} GB ({disk_used_pct}%)"
-            f" — this is total machine disk, not MongoDB data size.",
+            f"Filesystem disk: {disk_used_gb} GB used of {disk_total_gb} GB ({disk_used_pct}%)",
+            "Note: disk figures are from MongoDB's filesystem view (fsUsedSize) and may differ"
+            " from OS tools on macOS/APFS due to purgeable space and snapshots."
+            " Reliable on Linux production servers.",
         ]
         if disk_used_pct >= _THRESHOLDS["disk_used_pct_warning"]:
             findings.append(
                 f"Filesystem disk at {disk_used_pct}% — "
-                f"{'CRITICAL: risk of write failures.' if disk_used_pct >= _THRESHOLDS['disk_used_pct_critical'] else 'WARNING: monitor closely.'}"
+                f"{'CRITICAL: risk of mongod write failures.' if disk_used_pct >= _THRESHOLDS['disk_used_pct_critical'] else 'WARNING: monitor closely.'}"
             )
 
         return ReportSection(

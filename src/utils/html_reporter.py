@@ -57,7 +57,7 @@ a { color: #7dd3fc; }
 /* ── section grid ── */
 .sections {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+  grid-template-columns: 1fr;
   gap: 1.25rem;
   margin-bottom: 1.75rem;
 }
