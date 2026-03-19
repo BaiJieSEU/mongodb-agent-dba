@@ -18,7 +18,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, List
 
-from models.health_check_report import HealthCheckReport, Recommendation
+from models.health_check_report import HealthCheckReport, HealthSeverity, Recommendation
 
 if TYPE_CHECKING:
     from utils.config_loader import AppConfig
@@ -53,9 +53,11 @@ Rules:
 - "action" field: be specific and actionable — MongoDB shell commands, config parameter
   names, or clear investigation steps
 - "confidence" field: always set to "llm"
-- Output ONLY a valid JSON array — no explanation text, no markdown fences
+- CRITICAL: your ENTIRE response must be a single valid JSON array.
+  No preamble. No explanation. No markdown. No headers. Start with [ and end with ].
+  If there is nothing to add, respond with exactly: []
 
-Output schema:
+Output format (your full response must look exactly like this):
 [
   {
     "priority": "high | medium | low",
@@ -65,8 +67,6 @@ Output schema:
     "confidence": "llm"
   }
 ]
-
-If there are no additional recommendations, output exactly: []
 """
 
 # ── report serialiser ──────────────────────────────────────────────────────────
@@ -74,16 +74,27 @@ If there are no additional recommendations, output exactly: []
 def _report_to_prompt_json(report: HealthCheckReport) -> str:
     """Serialise report to compact JSON for the LLM prompt.
 
-    Strips verbose per-collection findings lines; keeps signal values and
-    the first 4 non-empty finding lines per section so the prompt stays concise.
+    Only includes WARNING/CRITICAL sections — OK sections have no actionable signals.
+    Limits to signals that breach their threshold (or all signals if none do).
+    Keeps first 3 non-empty finding lines per section to stay within model context.
     """
     sections = []
     for s in report.sections:
-        key_findings = [f.strip() for f in s.findings if f.strip()][:4]
+        if s.severity == HealthSeverity.OK:
+            continue  # nothing to act on
+        # Prefer signals that breach threshold; fall back to all if none do
+        breached = [
+            sig for sig in s.signals
+            if sig.threshold is not None and isinstance(sig.value, (int, float))
+            and isinstance(sig.threshold, (int, float))
+            and (sig.value > sig.threshold or sig.value < sig.threshold * 0.9)
+        ]
+        sig_list = breached if breached else s.signals[:6]
+        key_findings = [f.strip() for f in s.findings if f.strip()][:3]
         sections.append({
             "name": s.name,
             "severity": s.severity.value,
-            "signals": [sig.to_dict() for sig in s.signals],
+            "signals": [sig.to_dict() for sig in sig_list],
             "key_findings": key_findings,
         })
 
@@ -118,6 +129,9 @@ def _parse_llm_response(raw: str) -> List[Recommendation]:
     - Missing or invalid fields (skipped gracefully)
     """
     text = raw.strip()
+
+    # Strip qwen3 / chain-of-thought <think>...</think> blocks before parsing
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
     # Strip markdown fences if present
     text = re.sub(r"^```(?:json)?\s*", "", text)
