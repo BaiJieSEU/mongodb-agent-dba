@@ -182,6 +182,7 @@ mongodb-agent-dba/
 ├── src/
 │   ├── agent/
 │   │   ├── health_check_runner.py        # Deterministic 8-section health check pipeline
+│   │   ├── llm_recommender.py            # LLM enrichment of health check recommendations (BL-034)
 │   │   └── intelligent_agentic_agent.py  # LLM-driven agentic investigation
 │   ├── memory/
 │   │   ├── __init__.py

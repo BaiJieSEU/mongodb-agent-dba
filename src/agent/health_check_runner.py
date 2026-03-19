@@ -136,6 +136,12 @@ class HealthCheckRunner:
             sections=sections,
             recommendations=recommendations,
         )
+
+        # BL-034: LLM enrichment — cross-section reasoning on top of rule-based recs
+        if self.config.agent.llm_recommendations:
+            from agent.llm_recommender import LLMRecommender
+            logger.info("BL-034: running LLM recommendation enrichment")
+            report.recommendations = LLMRecommender(self.config).enrich(report)
         report.report_path = str(self._save_report(report))
         self._purge_old_reports()
         return report

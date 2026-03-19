@@ -38,6 +38,7 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-008 | Aggregation pipeline analysis | P1 | M | 1 | 🔲 |
 | BL-012 | Trend comparison in scheduled runs | P1 | M | 2 | 🔲 |
 | BL-022 | Webhook / notification output | P1 | M | 3 | 🔲 |
+| BL-034 | LLM-driven recommendation enrichment (hybrid) | P1 | M | 3 | ✅ Done |
 | BL-031 | Automatic tool parameter chaining | P1 | M | 4 | 🔲 |
 | BL-060 | HTML report output | P1 | M | 7 | ✅ Done |
 | BL-073 | Secret management integration | P1 | M | 8 | 🔲 |
@@ -53,12 +54,12 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
 | BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
 
-**Done:** 12 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014)
+**Done:** 14 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014, BL-009, BL-034)
 **Partial:** 2 items (BL-050 — within-cluster multi-DB done; BL-071 — LLM+MongoDB env vars done, full coverage pending)
 **P0:** 4 remaining — scheduler (BL-011), baseline severity (BL-021), typed output (BL-030), Docker (BL-070)
-**P1:** 15 items — high-value once P0 is in place (includes new BL-014, BL-015)
+**P1:** 16 items — high-value once P0 is in place (includes BL-034 LLM recommendations)
 **P2–P3:** 9 items — important but not blocking
-**Total:** 39 items across 8 epics (11 done, 2 partial, 26 remaining)
+**Total:** 40 items across 8 epics (13 done, 2 partial, 25 remaining)
 
 ---
 
@@ -795,6 +796,62 @@ Written alongside JSON and HTML as `reports/health_YYYY-MM-DD_HH-MM-SS.md`.
 recommendations set `high` when filter fields are extracted from profiler data, `medium`
 when they cannot be determined. Drop-index recommendations are `medium`. Displayed in
 Rich console, HTML report, and Markdown report.
+
+---
+
+### BL-034 · LLM-driven recommendation enrichment (hybrid)
+**Priority:** P1 | **Size:** M | **Epic:** 3
+
+**Story:** As a DBA, I want recommendations that reason across all health check sections
+and real observed values — not just two hardcoded rules — so I can act on the most
+impactful issues rather than missing signals the rule engine ignores.
+
+**Problem with the current approach:**
+`_build_recommendations()` only fires on two rules:
+1. Full-scan slow query → `createIndex`
+2. Zero-access index → `dropIndex`
+
+Signals collected by the pipeline that never produce recommendations today:
+- Cache hit ratio below threshold (§8)
+- Lock wait % elevated (§8)
+- Page faults detected (§8)
+- Oplog window < warning threshold (§3)
+- Sort spills to disk (§5)
+- Cross-section patterns (e.g. low cache + high targeting + full scans → memory, not just indexes)
+
+**Design — hybrid, not LLM-only:**
+
+```
+HealthCheckRunner.run()
+    → HealthCheckReport  (deterministic, unchanged)
+    → _build_recommendations()      ← keep: fast, obvious, high-confidence rules
+    → LLMRecommender.enrich(report) ← NEW: LLM pass over structured report JSON
+    → merged + deduplicated list    → report.recommendations
+```
+
+The LLM receives the completed `HealthCheckReport` serialised as clean JSON
+(section names, severity, signals with values and thresholds, findings text).
+It does NOT touch raw MongoDB output — all data collection stays deterministic.
+
+**Prompt contract:**
+- Input: `HealthCheckReport` as JSON + system prompt defining `Recommendation` schema
+- Output: JSON array of `Recommendation` objects (`priority`, `collection`, `action`, `evidence`, `confidence`)
+- Temperature: 0 (deterministic output)
+- LLM failure: gracefully skipped — rule-based recommendations still returned
+
+**What the LLM can do that rules cannot:**
+- Notice that cache hit ratio is low AND targeting ratio is high → recommend increasing `wiredTigerCacheSizeGB` not just adding indexes
+- Spot that oplog window is 2h AND writes are high → flag replication risk
+- Prioritise across sections: a CRITICAL cache miss may outrank a WARNING unused index
+- Phrase recommendations in natural language matched to the specific observed values
+
+**Acceptance criteria:**
+- `LLMRecommender` class in `src/agent/llm_recommender.py`
+- Prompt produces valid `Recommendation` JSON; malformed output is caught and skipped
+- Rule-based recommendations still generated first (deduplicated by `collection + action`)
+- LLM-generated recommendations tagged `confidence: llm` in the model
+- Config flag `agent.llm_recommendations: true/false` (default `false` until stable)
+- Existing behaviour unchanged when flag is off or LLM unavailable
 
 ---
 

@@ -34,6 +34,7 @@ agent:
   slow_query_threshold_ms: 5
   max_queries_to_analyze: 10
   investigation_timeout: 60
+  llm_recommendations: true   # BL-034: enrich health check recommendations with LLM
 
 logging:
   level: "INFO"

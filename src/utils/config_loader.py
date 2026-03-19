@@ -48,6 +48,7 @@ class AgentConfig(BaseModel):
     slow_query_threshold_ms: int
     max_queries_to_analyze: int
     investigation_timeout: int
+    llm_recommendations: bool = False   # BL-034: enrich health check recs with LLM
 
 
 class DemoConfig(BaseModel):
