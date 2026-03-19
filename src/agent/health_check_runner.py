@@ -1,27 +1,31 @@
-"""Cluster health check runner (BL-020 through BL-004).
+"""Cluster health check runner (BL-020 through BL-009).
 
 Deterministic pipeline — tool execution order is fixed, severity thresholds are
 rule-based Python. LLM is NOT used here; findings are derived directly from
-structured MCP results so scheduled runs are reliable and fast.
+structured data so scheduled runs are reliable and fast.
+
+Data access:
+  §1–7  MCPClient → MongoDB MCP Server (--readOnly)
+  §8    Direct PyMongo admin.command("serverStatus") via MongoDBManager
+        (read-only admin command; not exposed by the MCP toolset)
 
 MCP tool availability (confirmed via list_tools()):
   ✅ list-databases, list-collections, find, aggregate, count
   ✅ collection-storage-size, db-stats, collection-indexes
-  ⚠️  serverStatus — NOT available (no runCommand).
-       Workaround: local.startup_log → version/uptime; db-stats → disk usage.
-       Connections, memory, page faults cannot be obtained via MCP read-only.
-  ⚠️  replSetGetStatus — NOT available.
+  ✅ serverStatus — obtained via direct PyMongo (BL-009)
+  ⚠️  replSetGetStatus — NOT available via MCP.
        Workaround: local.system.replset → RS config; local.oplog.rs → oplog window.
-       Member health states and per-member lag are not obtainable via MCP.
+       Per-member replication lag not obtainable.
 
 Section order:
-  1  Cluster Overview      list-databases, list-collections
-  2  Server Health         local.startup_log, db-stats (BL-001)
-  3  Replication Health    local.system.replset, local.oplog.rs (BL-002)
-  4  Storage & Capacity    collection-storage-size, count, db-stats (BL-003)
-  5  Query Performance     find on system.profile
-  6  Index Health          collection-indexes on top slow collections
-  7  Index Usage           aggregate $indexStats (BL-004)
+  1  Cluster Overview      list-databases, list-collections (MCP)
+  2  Server Health         local.startup_log, db-stats (MCP / BL-001)
+  3  Replication Health    local.system.replset, local.oplog.rs (MCP / BL-002)
+  4  Storage & Capacity    collection-storage-size, count, db-stats (MCP / BL-003)
+  5  Query Performance     find on system.profile (MCP)
+  6  Index Health          collection-indexes on top slow collections (MCP)
+  7  Index Usage           aggregate $indexStats (MCP / BL-004)
+  8  Operations            admin.command("serverStatus") via direct PyMongo (BL-009)
 """
 
 import json
@@ -34,6 +38,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from utils.config_loader import AppConfig
 from utils.mcp_client import MCPClient
+from utils.mongodb_client import MongoDBManager
 from models.health_check_report import (
     HealthCheckReport, HealthSeverity, ReportSection, Recommendation, Signal,
     worst_severity,
@@ -55,6 +60,15 @@ _THRESHOLDS = {
     "oplog_window_critical_hours": 4,
     "full_scan_examined_min": 1000,
     "full_scan_selectivity_max": 0.01,
+    # §8 Operations (BL-009)
+    "cache_hit_ratio_warning": 0.95,   # below 95 % → warning
+    "cache_hit_ratio_critical": 0.80,  # below 80 % → critical
+    "lock_wait_pct_warning": 5.0,      # lock wait > 5 % → warning
+    "lock_wait_pct_critical": 20.0,    # lock wait > 20 % → critical
+    "query_targeting_warning": 10.0,   # scanned-to-returned ratio > 10 → warning
+    "query_targeting_critical": 100.0, # scanned-to-returned ratio > 100 → critical
+    "memory_resident_warning_mb": 4096,   # RSS > 4 GB → warning (indicative)
+    "memory_resident_critical_mb": 8192,  # RSS > 8 GB → critical (indicative)
 }
 
 _SYSTEM_DBS = {"admin", "config", "local"}
@@ -66,6 +80,7 @@ class HealthCheckRunner:
     def __init__(self, config: AppConfig):
         self.config = config
         self._mcp: Optional[MCPClient] = None
+        self._mongo: Optional[MongoDBManager] = None
 
     # ── public entry point ─────────────────────────────────────────────────────
 
@@ -75,27 +90,40 @@ class HealthCheckRunner:
         sections: List[ReportSection] = []
         slow_queries: List[Dict[str, Any]] = []
 
-        with MCPClient(self.config.mongodb.monitored_cluster) as mcp:
-            self._mcp = mcp
+        # Direct PyMongo connection for §8 (serverStatus — not in MCP toolset)
+        self._mongo = MongoDBManager(
+            agent_store_uri=self.config.mongodb.agent_store,
+            monitored_cluster_uri=self.config.mongodb.monitored_cluster,
+        )
 
-            # Fetch user databases once — shared by sections 1, 3, 4, 7
-            db_blocks = self._mcp.call_tool("list-databases", {})
-            all_dbs = self._parse_name_blocks(db_blocks)
-            user_dbs = [d for d in all_dbs if d not in _SYSTEM_DBS]
+        try:
+            with MCPClient(self.config.mongodb.monitored_cluster) as mcp:
+                self._mcp = mcp
 
-            # Fixed, deterministic section order
-            sections.append(self._section_cluster_overview(user_dbs))
-            sections.append(self._section_server_health())                   # BL-001
-            sections.append(self._section_replication_health())              # BL-002
-            sections.append(self._section_storage_stats(user_dbs))          # BL-003
-            perf_section, slow_queries = self._section_query_performance(user_dbs)
-            sections.append(perf_section)
-            top_colls = self._top_slow_collections(slow_queries, n=3)
-            sections.append(self._section_index_health(top_colls))
-            usage_section, unused_indexes = self._section_index_usage(user_dbs)  # BL-004
-            sections.append(usage_section)
+                # Fetch user databases once — shared by sections 1, 3, 4, 7
+                db_blocks = self._mcp.call_tool("list-databases", {})
+                all_dbs = self._parse_name_blocks(db_blocks)
+                user_dbs = [d for d in all_dbs if d not in _SYSTEM_DBS]
 
-            self._mcp = None
+                # Fixed, deterministic section order
+                sections.append(self._section_cluster_overview(user_dbs))
+                sections.append(self._section_server_health())                   # BL-001
+                sections.append(self._section_replication_health())              # BL-002
+                sections.append(self._section_storage_stats(user_dbs))          # BL-003
+                perf_section, slow_queries = self._section_query_performance(user_dbs)
+                sections.append(perf_section)
+                top_colls = self._top_slow_collections(slow_queries, n=3)
+                sections.append(self._section_index_health(top_colls))
+                usage_section, unused_indexes = self._section_index_usage(user_dbs)  # BL-004
+                sections.append(usage_section)
+
+                self._mcp = None
+
+            # §8 Operations — direct PyMongo serverStatus (BL-009)
+            sections.append(self._section_operations())
+        finally:
+            self._mongo.close_connections()
+            self._mongo = None
 
         recommendations = self._build_recommendations(slow_queries, sections, unused_indexes)
         overall = worst_severity([s.severity for s in sections])
@@ -670,6 +698,204 @@ class HealthCheckRunner:
             ],
             findings=findings,
         ), unused
+
+    # ── Section 8: Operations / serverStatus (BL-009) ──────────────────────────
+
+    def _section_operations(self) -> ReportSection:
+        """Fetch serverStatus via direct PyMongo and derive operational health signals.
+
+        Metrics captured:
+          opcounters   → reads/sec, writes/sec, getmore rate (totals since start)
+          mem          → resident MB, virtual MB
+          extra_info   → user_time_us (CPU), page_faults
+          wiredTiger   → cache hit ratio, cache bytes used/max, eviction pressure
+          locks        → global lock wait percentage
+          metrics      → cluster-level query targeting ratio, scanAndOrder count
+        """
+        if self._mongo is None:
+            return ReportSection(
+                name="Operations",
+                severity=HealthSeverity.WARNING,
+                signals=[],
+                findings=["serverStatus unavailable — MongoDBManager not initialised."],
+            )
+
+        ss = self._mongo.get_server_status()
+        if ss is None:
+            return ReportSection(
+                name="Operations",
+                severity=HealthSeverity.WARNING,
+                signals=[],
+                findings=["serverStatus command failed or is unavailable on this deployment."],
+            )
+
+        findings: List[str] = []
+        signals: List[Signal] = []
+        severities: List[HealthSeverity] = [HealthSeverity.OK]
+
+        # ── Throughput (opcounters) ─────────────────────────────────────────────
+        opcounters = ss.get("opcounters", {})
+        reads       = int(opcounters.get("query",   0))
+        writes      = int(opcounters.get("insert",  0)) + int(opcounters.get("update", 0)) + int(opcounters.get("delete", 0))
+        getmores    = int(opcounters.get("getmore", 0))
+        commands    = int(opcounters.get("command", 0))
+        signals += [
+            Signal("total_reads",    reads,    "ops (cumulative)"),
+            Signal("total_writes",   writes,   "ops (cumulative)"),
+            Signal("total_getmores", getmores, "ops (cumulative)"),
+            Signal("total_commands", commands, "ops (cumulative)"),
+        ]
+        findings.append(
+            f"Throughput (cumulative since restart): "
+            f"reads {reads:,}  writes {writes:,}  getmores {getmores:,}  commands {commands:,}"
+        )
+
+        # ── Memory ─────────────────────────────────────────────────────────────
+        mem = ss.get("mem", {})
+        rss_mb  = int(mem.get("resident", 0))
+        virt_mb = int(mem.get("virtual",  0))
+        signals += [
+            Signal("memory_resident_mb", rss_mb,  "MB", _THRESHOLDS["memory_resident_warning_mb"]),
+            Signal("memory_virtual_mb",  virt_mb, "MB"),
+        ]
+        findings.append(f"Memory: resident {rss_mb:,} MB  ·  virtual {virt_mb:,} MB")
+        if rss_mb >= _THRESHOLDS["memory_resident_critical_mb"]:
+            severities.append(HealthSeverity.CRITICAL)
+            findings.append(
+                f"  Resident memory ({rss_mb:,} MB) exceeds critical threshold "
+                f"({_THRESHOLDS['memory_resident_critical_mb']:,} MB) — review WiredTiger cache size and working set."
+            )
+        elif rss_mb >= _THRESHOLDS["memory_resident_warning_mb"]:
+            severities.append(HealthSeverity.WARNING)
+            findings.append(
+                f"  Resident memory ({rss_mb:,} MB) is elevated — monitor for growth."
+            )
+
+        # ── CPU (user time) & page faults ───────────────────────────────────────
+        extra = ss.get("extra_info", {})
+        page_faults  = int(extra.get("page_faults",   0))
+        user_time_us = int(extra.get("user_time_us",  0)) if "user_time_us" in extra else None
+        signals.append(Signal("page_faults", page_faults, "faults (cumulative)"))
+        if user_time_us is not None:
+            signals.append(Signal("cpu_user_time_sec", round(user_time_us / 1_000_000, 1), "sec (cumulative)"))
+            findings.append(
+                f"CPU: user time {user_time_us / 1_000_000:,.1f} sec (cumulative)  ·  page faults {page_faults:,}"
+            )
+        else:
+            findings.append(f"Page faults: {page_faults:,} (cumulative)")
+
+        if page_faults > 0:
+            severities.append(HealthSeverity.WARNING)
+            findings.append(
+                f"  Page faults detected ({page_faults:,} since restart) — "
+                f"working set may exceed available RAM; consider increasing memory or reducing cache pressure."
+            )
+
+        # ── WiredTiger cache ────────────────────────────────────────────────────
+        wt_cache = ss.get("wiredTiger", {}).get("cache", {})
+        cache_used  = wt_cache.get("bytes currently in the cache",     0)
+        cache_max   = wt_cache.get("maximum bytes configured",         0)
+        pages_read  = wt_cache.get("pages read into cache",            0)
+        pages_req   = wt_cache.get("pages requested from the cache",   0)
+        pages_evict = wt_cache.get("unmodified pages evicted",         0)
+
+        cache_used_mb = round(cache_used / (1024 ** 2), 1) if cache_used else 0
+        cache_max_mb  = round(cache_max  / (1024 ** 2), 1) if cache_max  else 0
+
+        # Hit ratio: fraction of pages served from cache (vs read from disk)
+        if pages_req > 0:
+            hit_ratio = round(1.0 - pages_read / pages_req, 4)
+        else:
+            hit_ratio = 1.0
+
+        signals += [
+            Signal("wt_cache_used_mb",  cache_used_mb, "MB"),
+            Signal("wt_cache_max_mb",   cache_max_mb,  "MB"),
+            Signal("wt_cache_hit_ratio", round(hit_ratio * 100, 1), "%",
+                   _THRESHOLDS["cache_hit_ratio_warning"] * 100),
+            Signal("wt_pages_evicted",  pages_evict,   "pages (cumulative)"),
+        ]
+        findings.append(
+            f"WiredTiger cache: {cache_used_mb:,} MB used / {cache_max_mb:,} MB max  ·  "
+            f"hit ratio {hit_ratio * 100:.1f}%  ·  pages evicted {pages_evict:,}"
+        )
+        if hit_ratio < _THRESHOLDS["cache_hit_ratio_critical"]:
+            severities.append(HealthSeverity.CRITICAL)
+            findings.append(
+                f"  Cache hit ratio is critically low ({hit_ratio * 100:.1f}%)  — "
+                f"data is being read from disk on most requests. Increase wiredTigerCacheSizeGB or reduce working set."
+            )
+        elif hit_ratio < _THRESHOLDS["cache_hit_ratio_warning"]:
+            severities.append(HealthSeverity.WARNING)
+            findings.append(
+                f"  Cache hit ratio ({hit_ratio * 100:.1f}%) is below the {_THRESHOLDS['cache_hit_ratio_warning'] * 100:.0f}% "
+                f"warning threshold — consider increasing WiredTiger cache."
+            )
+
+        # ── Global lock wait % ──────────────────────────────────────────────────
+        locks = ss.get("locks", {}).get("Global", {})
+        acquire_wait  = sum(locks.get("acquireWaitCount", {}).values())
+        acquire_total = sum(locks.get("acquireCount",     {}).values())
+        lock_wait_pct = round(acquire_wait / acquire_total * 100, 2) if acquire_total else 0.0
+
+        signals.append(Signal("lock_wait_pct", lock_wait_pct, "%",
+                               _THRESHOLDS["lock_wait_pct_warning"]))
+        findings.append(f"Global lock wait: {lock_wait_pct:.2f}% of acquisitions waited")
+        if lock_wait_pct >= _THRESHOLDS["lock_wait_pct_critical"]:
+            severities.append(HealthSeverity.CRITICAL)
+            findings.append(
+                f"  Lock contention is critically high ({lock_wait_pct:.1f}%) — "
+                f"investigate long-running operations or high write concurrency."
+            )
+        elif lock_wait_pct >= _THRESHOLDS["lock_wait_pct_warning"]:
+            severities.append(HealthSeverity.WARNING)
+            findings.append(
+                f"  Lock wait percentage ({lock_wait_pct:.1f}%) exceeds warning threshold "
+                f"({_THRESHOLDS['lock_wait_pct_warning']}%) — watch for concurrency issues."
+            )
+
+        # ── Cluster-level query targeting ratio ────────────────────────────────
+        qe = ss.get("metrics", {}).get("queryExecutor", {})
+        scanned     = int(qe.get("scanned",        0))
+        scanned_obj = int(qe.get("scannedObjects",  0))
+        scan_and_order = int(ss.get("metrics", {}).get("operation", {}).get("scanAndOrder", 0))
+
+        total_scanned = scanned + scanned_obj
+        if total_scanned > 0 and reads > 0:
+            targeting_ratio = round(total_scanned / reads, 1)
+        else:
+            targeting_ratio = 0.0
+
+        signals += [
+            Signal("cluster_scanned_keys",    scanned,        "keys (cumulative)"),
+            Signal("cluster_scanned_objects",  scanned_obj,    "objects (cumulative)"),
+            Signal("cluster_targeting_ratio",  targeting_ratio, "keys+objs per read",
+                   _THRESHOLDS["query_targeting_warning"]),
+            Signal("cluster_scan_and_order",   scan_and_order, "in-memory sorts (cumulative)"),
+        ]
+        findings.append(
+            f"Query targeting (cluster): scanned {total_scanned:,} keys/objects  ·  "
+            f"ratio {targeting_ratio:,.1f}× per read  ·  in-memory sorts {scan_and_order:,}"
+        )
+        if targeting_ratio >= _THRESHOLDS["query_targeting_critical"]:
+            severities.append(HealthSeverity.CRITICAL)
+            findings.append(
+                f"  Cluster targeting ratio is critically high ({targeting_ratio:,.0f}×) — "
+                f"many queries are doing full collection scans. Review index coverage."
+            )
+        elif targeting_ratio >= _THRESHOLDS["query_targeting_warning"]:
+            severities.append(HealthSeverity.WARNING)
+            findings.append(
+                f"  Cluster targeting ratio ({targeting_ratio:,.1f}×) exceeds warning threshold "
+                f"({_THRESHOLDS['query_targeting_warning']}×) — check for missing or unused indexes."
+            )
+
+        return ReportSection(
+            name="Operations",
+            severity=worst_severity(severities),
+            signals=signals,
+            findings=findings,
+        )
 
     # ── helpers ────────────────────────────────────────────────────────────────
 

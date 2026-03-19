@@ -1,6 +1,6 @@
 # MongoDB DBA Agent — Product Requirements
 
-Version: 0.2.0 | Updated: 2026-03-16
+Version: 0.5.0 | Updated: 2026-03-19
 
 ---
 
@@ -25,6 +25,11 @@ signals the agent must read and interpret.
 |---|---|---|
 | Slow queries (≥ threshold ms) | `system.profile` | ✅ v0.2.0 |
 | Query execution plans | MCP `explain` | ✅ v0.2.0 |
+| Scan-and-sort (in-memory sort) | `system.profile.hasSortStage` | ✅ v0.4.0 |
+| Query targeting ratio (per query) | `keysExamined / docsReturned` | ✅ v0.4.0 |
+| Cluster-level query targeting ratio | `serverStatus.metrics.queryExecutor` | ✅ v0.5.0 |
+| Cluster-level scan-and-order count | `serverStatus.metrics.operation.scanAndOrder` | ✅ v0.5.0 |
+| Query plan analysis (`planSummary`) | `system.profile.planSummary` | ✅ v0.4.0 |
 | Currently running long operations | `db.currentOp()` | ❌ missing |
 | Aggregation pipeline efficiency | MCP `explain` on aggregations | ❌ missing |
 | Query plan cache poisoning | `planCacheStats` | ❌ missing |
@@ -33,36 +38,41 @@ signals the agent must read and interpret.
 | Signal | Source | Current support |
 |---|---|---|
 | Index inventory per collection | MCP `collection-indexes` | ✅ v0.2.0 |
-| Missing indexes (from slow queries) | derived | ✅ basic |
-| Unused indexes | `$indexStats` aggregation | ❌ missing |
+| Missing indexes (from slow queries) | derived from profiler analysis | ✅ v0.3.0 |
+| Unused indexes | `$indexStats` aggregation | ✅ v0.4.0 |
 | Duplicate / redundant indexes | derived from index list | ❌ missing |
 | ESR ordering violations | LLM analysis of index fields | ⚠️ inconsistent |
 
 ### 2.3 Storage & Capacity
 | Signal | Source | Current support |
 |---|---|---|
-| Collection sizes and doc counts | `collStats` / `dbStats` | ❌ missing |
-| Storage engine cache hit ratio | `serverStatus.wiredTiger.cache` | ❌ missing |
-| Disk usage vs. available | `dbStats.fsUsedSize` | ❌ missing |
+| Collection sizes and doc counts | MCP `collection-storage-size`, `count` | ✅ v0.3.0 |
+| Filesystem disk usage vs. available | `dbStats.fsUsedSize / fsTotalSize` | ✅ v0.3.0 |
+| Storage engine cache hit ratio | `serverStatus.wiredTiger.cache` | ✅ v0.5.0 |
+| WiredTiger cache eviction pressure | `serverStatus.wiredTiger.cache` | ✅ v0.5.0 |
 | Collection growth trend (over time) | snapshot comparison in memory | ❌ missing |
 | Large documents / oversized fields | sampling + doc size | ❌ missing |
 
 ### 2.4 Replication Health
 | Signal | Source | Current support |
 |---|---|---|
-| Replica set member states | `replSetGetStatus` | ❌ missing |
-| Replication lag (primary → secondary) | `replSetGetStatus.optimeDate` delta | ❌ missing |
-| Oplog window (hours of oplog remaining) | `local.oplog.rs` stats | ❌ missing |
-| Hidden / delayed members | `replSetGetStatus` members | ❌ missing |
+| Replica set member list and config | `local.system.replset` (MCP) | ✅ v0.3.0 |
+| Oplog window (hours remaining) | `local.oplog.rs` stats (MCP) | ✅ v0.3.0 |
+| Replication lag (primary → secondary) | `replSetGetStatus.optimeDate` delta | ❌ not in MCP |
+| Hidden / delayed members | `replSetGetStatus` members | ❌ not in MCP |
 
 ### 2.5 Server & Connection Health
 | Signal | Source | Current support |
 |---|---|---|
-| Active connections vs. pool limit | `serverStatus.connections` | ❌ missing |
-| Lock wait time (global / collection) | `serverStatus.locks` | ❌ missing |
-| Page faults and memory pressure | `serverStatus.extra_info` | ❌ missing |
-| Profiler enabled and configured | `db.getProfilingStatus()` | ❌ missing |
-| Server uptime and version | `serverStatus.uptime`, `buildInfo` | ❌ missing |
+| Server uptime and version | `local.startup_log` (MCP) | ✅ v0.3.0 |
+| Memory (RSS / virtual MB) | `serverStatus.mem` | ✅ v0.5.0 |
+| CPU user time | `serverStatus.extra_info.user_time_us` | ✅ v0.5.0 |
+| Operations/sec (reads, writes, getmore) | `serverStatus.opcounters` | ✅ v0.5.0 |
+| WiredTiger cache hit ratio | `serverStatus.wiredTiger.cache` | ✅ v0.5.0 |
+| Lock wait percentage | `serverStatus.locks.Global` | ✅ v0.5.0 |
+| Page faults | `serverStatus.extra_info.page_faults` | ✅ v0.5.0 |
+| Active connections vs. pool limit | `serverStatus.connections` | ❌ BL-013 |
+| Profiler enabled and configured | `db.getProfilingStatus()` | ❌ BL-006 |
 
 ### 2.6 Security Posture (future scope)
 | Signal | Source | Current support |
@@ -99,15 +109,17 @@ to disk (or posts to a webhook), and stores the run in memory for trend comparis
 
 ## 4. Current State vs. Goal
 
-| Health check dimension | v0.2.0 coverage | Gap |
+| Health check dimension | v0.5.0 coverage | Gap |
 |---|---|---|
-| Query performance | Partial (profiler only) | `currentOp`, aggregation plans, plan cache |
-| Index health | Partial (inventory only) | Usage stats, duplicates, ESR validation |
-| Storage & capacity | None | All signals missing |
-| Replication health | None | All signals missing |
-| Server & connections | None | All signals missing |
-| Scheduling | None | Scheduler, report output, alerting |
+| Query performance | Good — slow queries, scan/sort, targeting ratio, plan analysis | `currentOp`, aggregation plans, plan cache |
+| Index health | Good — inventory, missing indexes, unused index detection | Duplicates, ESR validation |
+| Storage & capacity | Good — collection sizes, disk usage, cache hit ratio | Growth trends, large-document detection |
+| Replication health | Partial — RS member list, oplog window | Per-member lag (`replSetGetStatus` not in MCP) |
+| Server & connections | Good — memory, CPU, ops/sec, lock wait, page faults | Active connections (BL-013), profiler config (BL-006) |
+| Scheduling | None | Scheduler, report output, alerting (BL-011) |
 | Security posture | None | Deferred — not in current scope |
+| Report formats | JSON + HTML + Markdown | — |
+| Multi-LLM support | ollama, anthropic, azure_openai, bedrock | — |
 
 ---
 

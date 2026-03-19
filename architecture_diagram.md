@@ -1,110 +1,158 @@
 # MongoDB DBA Agent — Architecture Documentation
 
+Version: 0.5.0 | Updated: 2026-03-19
+
 ## System Overview
 
-Memory-enhanced agentic AI system for MongoDB database administration with intelligent reasoning capabilities.
+Memory-enhanced agentic AI system for MongoDB database administration. Two execution
+paths: an LLM-driven agentic investigation path and a deterministic health-check
+pipeline that produces structured JSON, HTML, and Markdown reports.
 
 ## High-Level Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                          User Interface Layer                          │
+│                          User Interface Layer                           │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │  👤 DBA/Engineer                                                        │
 │      │                                                                  │
-│      │ "my database is slow" / "check slow queries"                     │
+│      │  "my database is slow"  /  --health-check                       │
 │      │                                                                  │
 │      ▼                                                                  │
-│  ┌───────────────────────────────────────────────────────────────────┐   │
-│  │                    CLI Interface                                │   │
-│  │                 main_agentic.py                                │   │
-│  │                                                                 │   │
-│  │  • Rich console output                                          │   │
-│  │  • Command-line argument parsing                                │   │
-│  │  • Prerequisites checking                                       │   │
-│  └───────────────────────────────────────────────────────────────────┘   │
+│  ┌───────────────────────────────────────────────────────────────────┐  │
+│  │                    CLI Interface                                  │  │
+│  │                 main_agentic.py                                   │  │
+│  │                                                                   │  │
+│  │  • Rich console output                                            │  │
+│  │  • --health-check flag → deterministic pipeline                  │  │
+│  │  • Natural language → agentic investigation                      │  │
+│  └───────────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────┘
-                                   │
-                                   ▼
+                   │                            │
+          (agentic path)              (--health-check path)
+                   │                            │
+                   ▼                            ▼
+┌──────────────────────────┐   ┌────────────────────────────────────────┐
+│  AI Agent Intelligence   │   │     Deterministic Health Check          │
+│         Layer            │   │            Pipeline                     │
+├──────────────────────────┤   ├────────────────────────────────────────┤
+│                          │   │                                        │
+│  IntelligentAgenticDBA   │   │  HealthCheckRunner                     │
+│        Agent             │   │  (health_check_runner.py)              │
+│                          │   │                                        │
+│  Intent Analysis (LLM)   │   │  Fixed 8-section order:                │
+│  Memory Context Lookup   │   │  §1  Cluster Overview                  │
+│  Tool Selection  (LLM)   │   │  §2  Server Health                     │
+│  Response Synthesis(LLM) │   │  §3  Replication Health                │
+│  Investigation Storage   │   │  §4  Storage & Capacity                │
+│                          │   │  §5  Query Performance                 │
+│  ┌──────────────────────┐ │   │  §6  Index Health                      │
+│  │  LLM Factory         │ │   │  §7  Index Usage                       │
+│  │  (llm_factory.py)    │ │   │  §8  Operations (serverStatus)         │
+│  │                      │ │   │                                        │
+│  │  ollama    ✅         │ │   │  No LLM. Rule-based severity.          │
+│  │  anthropic ✅         │ │   │  Writes JSON + HTML + Markdown         │
+│  │  azure_openai ✅      │ │   │  to reports/ on every run.            │
+│  │  bedrock   ✅         │ │   │                                        │
+│  └──────────────────────┘ │   └────────────────────────────────────────┘
+└──────────────────────────┘                    │
+              │                                 │
+              └──────────────┬──────────────────┘
+                             │
+                             ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                      AI Agent Intelligence Layer                       │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  ┌───────────────────────────────────────────────────────────────────┐   │
-│  │              IntelligentAgenticDBAAgent                        │   │
-│  │           (intelligent_agentic_agent.py)                       │   │
-│  │                                                                 │   │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────┐ │   │
-│  │  │   Intent    │─▶│   Memory    │─▶│    Tool     │─▶│Response │ │   │
-│  │  │ Analysis    │  │  Context    │  │ Selection   │  │Synthesis│ │   │
-│  │  │   (LLM)     │  │  Lookup     │  │   (LLM)     │  │  (LLM)  │ │   │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────┘ │   │
-│  └───────────────────────────────────────────────────────────────────┘   │
-│                                │                                        │
-│                                ▼                                        │
-│  ┌───────────────────────────────────────────────────────────────────┐   │
-│  │                     QWEN LLM Engine                            │   │
-│  │                   qwen2.5-coder:7b                             │   │
-│  │                  (Ollama: localhost:11434)                     │   │
-│  └───────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────┘
-                                   │
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                       MCP Tool Execution Layer                         │
+│                        Data Access Layer                                │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │  MCPClient  (src/utils/mcp_client.py)                          │   │
-│  │  • Sync wrapper: background thread + asyncio.run()             │   │
-│  │  • One MCP subprocess per investigation session                │   │
-│  │  • call_tool(name, args)  /  list_tools()                      │   │
+│  │  MCPClient  (src/utils/mcp_client.py)                            │   │
+│  │  • Sync wrapper: background thread + asyncio.run()               │   │
+│  │  • One MCP subprocess per session; --readOnly enforced           │   │
+│  │  • call_tool(name, args) → list[str]                             │   │
+│  │                                                                  │   │
+│  │  Used for: §1–7 of health check + all agentic tool calls         │   │
 │  └──────────────────┬───────────────────────────────────────────────┘   │
-│                     │ stdio                                             │
-│                     ▼                                                   │
+│                     │ stdio                                              │
+│                     ▼                                                    │
 │  ┌──────────────────────────────────────────────────────────────────┐   │
-│  │  MongoDB MCP Server  (@mongodb-js/mongodb-mcp-server)          │   │
-│  │  --readOnly  --connectionString mongodb://localhost:27018       │   │
-│  │                                                                 │   │
-│  │  list-collections   list-databases   find (system.profile)     │   │
-│  │  explain            collection-indexes   connect                │   │
+│  │  MongoDB MCP Server  (@mongodb-js/mongodb-mcp-server)            │   │
+│  │  --readOnly  --connectionString mongodb://localhost:27018        │   │
+│  │                                                                  │   │
+│  │  list-databases  list-collections  find  aggregate               │   │
+│  │  collection-indexes  collection-storage-size  db-stats  count    │   │
+│  └──────────────────────────────────────────────────────────────────┘   │
+│                                                                         │
+│  ┌──────────────────────────────────────────────────────────────────┐   │
+│  │  Direct PyMongo — admin.command("serverStatus")                  │   │
+│  │  MongoDBManager.get_server_status()                              │   │
+│  │  (src/utils/mongodb_client.py)                                   │   │
+│  │                                                                  │   │
+│  │  Read-only admin command. No writes. Used for §8 Operations:     │   │
+│  │  opcounters, memory RSS/virtual, WiredTiger cache stats,         │   │
+│  │  lock wait %, query targeting ratio, page faults                 │   │
 │  └──────────────────────────────────────────────────────────────────┘   │
 │                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
-                                   │
-                                   ▼
+                             │
+                             ▼
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                            Data Storage Layer                          │
+│                            Data Storage Layer                           │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  ┌───────────────────────────────────────┐  ┌─────────────────────────────┐│
-│  │        Agent Memory Store           │  │     Monitored Cluster       ││
-│  │      MongoDB (localhost:27017)     │  │   MongoDB (localhost:27018) ││
-│  │                                     │  │                             ││
-│  │  ┌─────────────────────────────────┐   │  │  ┌─────────────────────────┐ ││
-│  │  │ agent_memory database       │   │  │  │    testdb database      │ ││
-│  │  │                             │   │  │  │                         │ ││
-│  │  │ • investigations (TTL:30d)  │   │  │  │ • users (50k docs)      │ ││
-│  │  │ • performance_issues (90d)  │   │  │  │ • products (5k docs)    │ ││
-│  │  │ • user_context              │   │  │  │ • system.profile        │ ││
-│  │  │                             │   │  │  │                         │ ││
-│  │  └─────────────────────────────────┘   │  │  └─────────────────────────┘ ││
-│  └───────────────────────────────────────┘  └─────────────────────────────┘│
-│                    ▲                                      ▲              │
-│                    │                                      │              │
-│                    └────── Memory Feedback Loop ──────────┘              │
+│  ┌─────────────────────────────────┐  ┌─────────────────────────────┐   │
+│  │     Agent Memory Store          │  │     Monitored Cluster       │   │
+│  │   MongoDB (localhost:27017)     │  │  MongoDB (localhost:27018)  │   │
+│  │                                 │  │                             │   │
+│  │  agent_memory database          │  │  testdb                     │   │
+│  │  • investigations (TTL:30d)     │  │  • users (~50k docs)        │   │
+│  │  • performance_issues (90d)     │  │  • orders (~10k docs)       │   │
+│  │  • user_context                 │  │  • products (~5k docs)      │   │
+│  │                                 │  │  • system.profile           │   │
+│  │                                 │  │                             │   │
+│  │                                 │  │  testUATdb                  │   │
+│  │                                 │  │  • uat_users (~2k docs)     │   │
+│  │                                 │  │  • uat_transactions         │   │
+│  └─────────────────────────────────┘  └─────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          Report Output Layer                            │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  HealthCheckReport (typed Pydantic model)                               │
+│      │                                                                  │
+│      ├──▶  JSON      reports/health_YYYY-MM-DD_HH-MM-SS.json           │
+│      ├──▶  HTML      reports/health_YYYY-MM-DD_HH-MM-SS.html           │
+│      │              (dark-theme, self-contained, zero dependencies)     │
+│      └──▶  Markdown  reports/health_YYYY-MM-DD_HH-MM-SS.md             │
+│                      (CommonMark; GitHub-renderable)                    │
+│                                                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Agentic Intelligence Components
 
+### LLM Factory (BL-032 ✅)
+`src/agent/llm_factory.py` — `build_llm(config: LLMConfig) -> BaseChatModel`
+
+Supports four providers via a single `provider:` key in `agent_config.yaml`:
+
+| Provider | LangChain backend | Notes |
+|---|---|---|
+| `ollama` | `langchain-ollama` | Default; local; no API key required |
+| `anthropic` | `langchain-anthropic` | Requires `ANTHROPIC_API_KEY` |
+| `azure_openai` | `langchain-openai` | Requires `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT` |
+| `bedrock` | `langchain-aws` | Requires AWS credentials |
+
 ### Intent Classification
 The agent analyzes natural language input to determine investigation strategy:
 
 - **DIRECT_ANSWER**: General questions ("what's your name")
-- **DATABASE_METADATA**: Information requests ("how many collections")  
+- **DATABASE_METADATA**: Information requests ("how many collections")
 - **PERFORMANCE_ANALYSIS**: Performance issues ("database is slow")
+- **COMPLEX_INVESTIGATION**: Multi-signal investigations
 
 ### Memory System
 MongoDB-based persistent learning across investigations:
@@ -112,7 +160,7 @@ MongoDB-based persistent learning across investigations:
 ```
 agent_memory (localhost:27017)
 ├── investigations        # Complete investigation records (TTL: 30 days)
-├── performance_issues    # Recurring slow query tracking (TTL: 90 days)  
+├── performance_issues    # Recurring slow query tracking (TTL: 90 days)
 └── user_context         # User preferences and patterns
 ```
 
@@ -125,134 +173,147 @@ LLM produces an investigation plan (ordered list of tool calls + parameters) bas
 Tools are not hardcoded Python classes — they are logical names that `execute_tool()`
 dispatches to the corresponding MongoDB MCP Server operation via `MCPClient`.
 
-## Investigation Workflow
+## Health Check Pipeline
+
+### Section Pipeline (deterministic — no LLM)
 
 ```
-                    User Query
-                        │
-                        ▼
-    ┌─────────────────────────────────────────────────────────┐
-    │               Intent Analysis                           │
-    │  • Classify request type (LLM)                          │
-    │  • Parse natural language intent                        │
-    │  • Determine investigation scope                        │
-    └─────────────────────────────────────────────────────────┘
-                        │
-                        ▼
-    ┌─────────────────────────────────────────────────────────┐
-    │             Memory Context Lookup                       │
-    │  • Retrieve recent investigations                       │
-    │  • Find recurring performance issues                    │
-    │  • Build contextual background                          │
-    └─────────────────────────────────────────────────────────┘
-                        │
-                        ▼
-    ┌─────────────────────────────────────────────────────────┐
-    │              Tool Selection & MCP Execution             │
-    │  • LLM produces ordered investigation plan              │
-    │  • MCPClient spawns MongoDB MCP Server subprocess       │
-    │  • Each tool maps to one MCP operation (read-only)      │
-    │  • Results parsed from MCP text content blocks          │
-    └─────────────────────────────────────────────────────────┘
-                        │
-                        ▼
-    ┌─────────────────────────────────────────────────────────┐
-    │           Response Generation & Memory Storage          │
-    │  • Synthesize findings with context (LLM)               │
-    │  • Generate memory-aware recommendations                │
-    │  • Store investigation for future reference             │
-    └─────────────────────────────────────────────────────────┘
-                        │
-                        ▼
-                   Final Report
+HealthCheckRunner.run()
+    │
+    ├── list-databases (MCP)
+    │       → user_dbs list (dynamic, no hardcoded DB names)
+    │
+    ├── §1  Cluster Overview         list-databases, list-collections (MCP)
+    ├── §2  Server Health            local.startup_log, db-stats (MCP)
+    ├── §3  Replication Health       local.system.replset, local.oplog.rs (MCP)
+    ├── §4  Storage & Capacity       collection-storage-size, count, db-stats (MCP)
+    ├── §5  Query Performance        find on system.profile (MCP)
+    ├── §6  Index Health             collection-indexes (MCP)
+    ├── §7  Index Usage              aggregate $indexStats (MCP)
+    └── §8  Operations               admin.command("serverStatus") (Direct PyMongo)
+            → opcounters, memory, WiredTiger cache, lock wait, targeting ratio
 ```
 
-## MCP Tool Mapping
+### Dual Data-Access Pattern (§8 Operations)
 
-The agent's logical tools map directly to MongoDB MCP Server operations:
+The health check pipeline uses two data access paths:
 
-| Agent Tool | MCP Operation | Purpose |
+**Path A — MCP (§1–7):**
+All standard health-check data flows through `MCPClient` → MongoDB MCP Server
+with `--readOnly` enforced at the MCP layer. No direct PyMongo connection to the
+monitored cluster is used here.
+
+**Path B — Direct PyMongo (§8):**
+`serverStatus` is a read-only admin command that is not exposed by the MCP Server's
+tool set. `MongoDBManager.get_server_status()` issues `admin.command("serverStatus")`
+directly against the monitored cluster. This is a read-only operation — no writes
+are made. Every production monitoring tool (Datadog, New Relic, Ops Manager) uses
+the same approach.
+
+The `--readOnly` MCP flag guards the MCP tool layer only; it does not prevent a
+separate direct connection from issuing read-only admin commands.
+
+### MCP Tool Mapping
+
+| Section | MCP Tools | Notes |
 |---|---|---|
-| `list_collections` | `list-collections` | Collections in a database |
-| `list_databases` | `list-databases` | All available databases |
-| `fetch_slow_queries` | `find` on `system.profile` | Profiler slow query data |
-| `explain_query` | `explain` | Query execution plan |
-| `check_indexes` | `collection-indexes` | Existing indexes on a collection |
+| §1 Cluster Overview | `list-databases`, `list-collections` | Dynamic DB discovery |
+| §2 Server Health | `find` (local.startup_log), `db-stats` | Version, uptime, disk |
+| §3 Replication Health | `find` (local.system.replset, local.oplog.rs) | RS config, oplog window |
+| §4 Storage & Capacity | `collection-storage-size`, `count`, `db-stats` | Per-collection + filesystem |
+| §5 Query Performance | `find` (system.profile) | Slow queries, scan/sort, targeting |
+| §6 Index Health | `collection-indexes` | Missing indexes on slow collections |
+| §7 Index Usage | `aggregate` ($indexStats) | Unused index detection |
+| §8 Operations | *(direct PyMongo)* | serverStatus — not in MCP toolset |
 
-The MCP Server runs with `--readOnly` — no writes to the monitored cluster.
+### MCP Availability Constraints
 
-### MCPClient Implementation
+| Signal | Status | Source |
+|---|---|---|
+| Slow queries, profiler data | ✅ via MCP | `find` on `system.profile` |
+| Collection/DB sizes | ✅ via MCP | `collection-storage-size`, `db-stats` |
+| Index inventory | ✅ via MCP | `collection-indexes` |
+| Index usage stats | ✅ via MCP | `aggregate $indexStats` |
+| Oplog window | ✅ via MCP | `find` on `local.oplog.rs` |
+| RS member list | ✅ via MCP | `find` on `local.system.replset` |
+| `serverStatus` (ops, memory, cache) | ✅ via direct PyMongo | `admin.command("serverStatus")` |
+| Per-member replication lag | ❌ not obtainable | `replSetGetStatus` not in MCP |
+| Active connections | ❌ not obtainable | `serverStatus.connections` — covered in BL-013 |
+
+## Report Models
+
+`src/models/health_check_report.py`:
+
+```python
+HealthSeverity: ok | warning | critical
+Signal(name, value, unit, threshold)
+ReportSection(name, severity, signals, findings)
+Recommendation(priority, collection, action, evidence, confidence)
+HealthCheckReport(run_id, timestamp, cluster_uri, overall_severity, sections, recommendations)
+worst_severity(severities)  # ok < warning < critical
 ```
-MCPClient(mongodb_uri, read_only=True)
-  • __enter__: spawns MCP subprocess, waits for session ready
-  • call_tool(name, args) → list[str]  (text content blocks)
-  • list_tools() → list[str]
-  • __exit__: sends stop sentinel, joins thread
-```
-
-## Memory Enhancement Features
-
-### Persistent Learning
-- **Investigation History**: Tracks all past investigations with TTL expiration
-- **Pattern Recognition**: Identifies recurring performance issues
-- **Context Building**: Uses historical data to inform new investigations
-
-### Intelligent Recommendations  
-- **Memory-Aware Responses**: References past investigations in recommendations
-- **Recurring Issue Detection**: Highlights problems seen before
-- **Learning Over Time**: Provides increasingly intelligent suggestions
 
 ## Technology Stack
 
 ### Core Technologies
 - **Python 3.11+**: Application runtime
-- **LangChain-Ollama**: LLM integration
+- **LangChain**: LLM integration framework (multi-provider via `llm_factory.py`)
 - **mcp**: Python MCP client SDK (`mcp.ClientSession`, `mcp.client.stdio`)
-- **PyMongo**: MongoDB driver (agent memory store only)
-- **QWEN 2.5-coder:7b**: Local LLM for reasoning
+- **PyMongo**: MongoDB driver — agent memory store (port 27017) + direct serverStatus reads (port 27018)
+- **qwen3:8b**: Default local LLM (recommended); `qwen2.5-coder:7b` also supported
 - **Rich**: Console output formatting
+- **Pydantic v2**: Typed report schema and config models
 
 ### Infrastructure
-- **MongoDB MCP Server** (`@mongodb-js/mongodb-mcp-server`): All database operations on monitored cluster
+- **MongoDB MCP Server** (`@mongodb-js/mongodb-mcp-server`): §1–7 health-check and all agentic data access
 - **Node.js 18+**: Runtime for MongoDB MCP Server
-- **MongoDB 8.0+**: Dual-instance setup (memory + monitored)
-- **Ollama**: Local LLM serving
-- **YAML Configuration**: Flexible system configuration
+- **MongoDB 8.0+**: Dual-instance setup (memory store on 27017 + monitored cluster on 27018)
+- **Ollama** (optional): Local LLM serving; replaceable with Anthropic/Azure/Bedrock via config
+- **YAML Configuration**: Flexible system configuration (`config/agent_config.yaml`)
+
+### LLM Configuration
+```yaml
+llm:
+  provider: ollama          # ollama | anthropic | azure_openai | bedrock
+  model: qwen3:8b
+  base_url: http://localhost:11434  # ollama only
+  temperature: 0
+```
 
 ## Security & Data Flow
 
 ### Local-First Design
-- **No External APIs**: All processing happens locally
-- **Encrypted Storage**: MongoDB connections use local security
-- **Data Isolation**: Memory and monitored databases separated  
-- **No Cloud Dependencies**: Complete local operation
+- **Read-Only by Default**: MCP Server runs with `--readOnly`; direct PyMongo calls are read-only admin commands only
+- **No External APIs**: All processing can run fully locally (ollama provider)
+- **Data Isolation**: Agent memory (port 27017) and monitored cluster (port 27018) are separate instances
+- **No Cloud Dependencies**: Cloud LLM providers are optional, not required
 
-### Data Flow Security
+### Data Flow
 ```
-User Input → Local LLM → Local Tools → Local MongoDB → Local Response
-     ▲                                                        │
-     └─────────────── No external data transmission ──────────┘
+User Input → CLI → [Agentic path: LLM → MCPClient → MCP Server → MongoDB:27018]
+                 → [Health check path: HealthCheckRunner
+                         → MCPClient (§1–7) → MCP Server → MongoDB:27018
+                         → MongoDBManager.get_server_status() (§8) → MongoDB:27018
+                    → HealthCheckReport → JSON + HTML + Markdown → reports/]
 ```
 
-## Configuration
+## Configuration Reference
 
-### System Configuration
 ```yaml
 mongodb:
   agent_store: "mongodb://localhost:27017"
   monitored_cluster: "mongodb://localhost:27018"
-  
-ollama:
-  base_url: "http://localhost:11434"
-  model: "qwen2.5-coder:7b"
-  
+
+llm:
+  provider: ollama
+  model: qwen3:8b
+  base_url: http://localhost:11434
+  temperature: 0
+
 agent:
   slow_query_threshold_ms: 5
   max_queries_to_analyze: 10
-```
 
-### Memory Settings
-```yaml
 memory:
   investigation_ttl_days: 30
   performance_issue_ttl_days: 90
@@ -262,18 +323,17 @@ memory:
 ## Production Considerations
 
 ### Scalability Extensions
-- **Multi-Database Support**: Extend to multiple monitored clusters
-- **Remote LLM Integration**: Add cloud LLM options (GPT, Claude)
-- **MongoDB Enterprise**: Integrate with Ops Manager and Atlas
-- **Web Interface**: Replace CLI with web dashboard
+- **Scheduler (BL-011)**: APScheduler or `schedule` lib; `--daemon` CLI flag; cron expression in config
+- **Docker Deployment (BL-070)**: `docker compose up` — single command startup
+- **Env Var Config (BL-071)**: All config overridable via `AGENT_*` env vars
+- **Typed Tool Output (BL-030)**: Replace string-parsing with dataclasses; LLM gets clean JSON
 
 ### Enterprise Features
 - **Role-Based Access**: Authentication and authorization
-- **Audit Logging**: Track all agent investigations  
-- **Alert Integration**: Connect to monitoring systems
-- **Batch Processing**: Scheduled performance analysis
+- **Audit Logging**: Track all agent investigations
+- **Alert Integration**: Webhook on severity threshold breach (BL-011 scheduler)
+- **Multi-Cluster**: Extend monitored_cluster to an array of URIs
 
-Foundation architecture for memory-enhanced AI assistants that improve database operations over time.
-
-See [REQUIREMENTS.md](REQUIREMENTS.md) for a critical analysis of what the system can and
-cannot replace, and the full enhancement roadmap.
+See [REQUIREMENTS.md](REQUIREMENTS.md) for a critical analysis of what the system can
+and cannot replace, and the full enhancement roadmap. See [BACKLOG.md](BACKLOG.md) for
+the prioritised 35-item roadmap.

@@ -80,18 +80,26 @@ keyword detection (`health check`, `cluster health`, etc.).
 
 **`src/agent/health_check_runner.py`** — `HealthCheckRunner`
 
-No LLM involved. Fixed 7-section pipeline executed in order inside one `MCPClient` session.
-Produces a `HealthCheckReport` saved as both JSON and HTML to `reports/`.
+No LLM involved. Fixed 8-section pipeline. §1–7 use `MCPClient`; §8 uses direct PyMongo
+`admin.command("serverStatus")` — a read-only admin command not exposed by the MCP toolset.
+Produces a `HealthCheckReport` saved as JSON + HTML + Markdown to `reports/`.
 
-| # | Section | MCP tools used | Backlog |
+| # | Section | Data source | Backlog |
 |---|---|---|---|
-| 1 | Cluster Overview | `list-databases`, `list-collections` | — |
-| 2 | Server Health | `find` on `local.startup_log`, `db-stats` (admin) | BL-001 ✅ |
-| 3 | Replication Health | `find` on `local.system.replset`, `local.oplog.rs` | BL-002 ✅ |
-| 4 | Storage & Capacity | `db-stats`, `collection-storage-size`, `count` | BL-003 ✅ |
-| 5 | Query Performance | `find` on `<db>.system.profile` for **every discovered database** | — |
-| 6 | Missing Indexes | `collection-indexes` on top slow collections (any db) | — |
-| 7 | Unused Indexes | `aggregate $indexStats` per collection across all databases | BL-004 ✅ |
+| 1 | Cluster Overview | MCP: `list-databases`, `list-collections` | — |
+| 2 | Server Health | MCP: `find` on `local.startup_log`, `db-stats` | BL-001 ✅ |
+| 3 | Replication Health | MCP: `find` on `local.system.replset`, `local.oplog.rs` | BL-002 ✅ |
+| 4 | Storage & Capacity | MCP: `db-stats`, `collection-storage-size`, `count` | BL-003 ✅ |
+| 5 | Query Performance | MCP: `find` on `<db>.system.profile` per discovered database | — |
+| 6 | Missing Indexes | MCP: `collection-indexes` on top slow collections | — |
+| 7 | Unused Indexes | MCP: `aggregate $indexStats` per collection across all databases | BL-004 ✅ |
+| 8 | Operations | Direct PyMongo: `admin.command("serverStatus")` | BL-009 ✅ |
+
+**Dual data-access pattern (§8):**
+`serverStatus` is a read-only admin command not in the MCP Server's toolset.
+`MongoDBManager.get_server_status()` issues `admin.command("serverStatus")` directly
+against the monitored cluster (port 27018). No writes. The `--readOnly` MCP flag guards
+only the MCP tool layer; it does not prevent a separate direct read-only admin command.
 
 **Key design invariants:**
 - Sections 5–7 iterate `user_dbs` (discovered at runtime via `list-databases`); no database
@@ -105,10 +113,10 @@ Produces a `HealthCheckReport` saved as both JSON and HTML to `reports/`.
   no string-parsing of finding lines. Iterates all slow queries per collection to find the
   best representative with extractable filter fields (skips aggregate-only profiler entries).
 
-**MCP availability constraints** (confirmed; no workaround possible via read-only MCP):
-- `serverStatus` → not available; workaround: `local.startup_log` + `db-stats`
-- `replSetGetStatus` → not available; workaround: `local.system.replset` + `local.oplog.rs`
-- Connections, memory (RSS), page faults, per-member replication lag → not obtainable
+**MCP availability constraints:**
+- `serverStatus` → not in MCP toolset; **solved via direct PyMongo (BL-009 ✅)**
+- `replSetGetStatus` → not in MCP toolset; workaround: `local.system.replset` + `local.oplog.rs`
+- Active connections (BL-013), per-member replication lag → still not obtainable
 
 **Report models** — `src/models/health_check_report.py`:
 - `HealthSeverity`: `ok | warning | critical`
@@ -129,7 +137,7 @@ Produces a `HealthCheckReport` saved as both JSON and HTML to `reports/`.
 - Dark-theme self-contained HTML; grouped sidebar nav (Overview / Performance / Reliability /
   Action), overall severity banner, section cards, recommendations table with `createIndex` /
   `dropIndex` scripts
-- Placeholder sections for Operations (BL-009) and Connections (BL-013) — marked "NOT AVAILABLE"
+- Operations section (BL-009 ✅) renders real serverStatus signals; Connections (BL-013) still placeholder
 - ~10 KB output; written alongside JSON as `reports/health_YYYY-MM-DD_HH-MM-SS.html`
 
 ---
@@ -173,7 +181,7 @@ Produces a `HealthCheckReport` saved as both JSON and HTML to `reports/`.
 mongodb-agent-dba/
 ├── src/
 │   ├── agent/
-│   │   ├── health_check_runner.py        # Deterministic 7-section health check pipeline
+│   │   ├── health_check_runner.py        # Deterministic 8-section health check pipeline
 │   │   └── intelligent_agentic_agent.py  # LLM-driven agentic investigation
 │   ├── memory/
 │   │   ├── __init__.py

@@ -26,7 +26,7 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-011 | Configurable scheduler | P0 | L | 2 | 🔲 |
 | BL-030 | Structured tool output (typed) | P0 | L | 4 | 🔲 |
 | BL-070 | Docker Compose deployment | P0 | L | 8 | 🔲 |
-| BL-009 | Operations health section (serverStatus metrics) | P1 | M | 1 | 🔲 |
+| BL-009 | Operations health section (serverStatus metrics) | P1 | M | 1 | ✅ Done |
 | BL-013 | Connection pool health section | P1 | M | 1 | 🔲 |
 | BL-014 | Scan & sort analysis in Query Performance | P1 | S | 1 | ✅ Done |
 | BL-015 | OS / infrastructure metrics (CPU, IOPS, disk queue) | P1 | L | 1 | 🔲 |
@@ -94,27 +94,25 @@ ratios so I can spot performance degradation that profiler data alone cannot sho
 | Page faults | `extra_info.page_faults` | Memory subsystem pressure |
 | Getmore rate | `opcounters.getmore` | Cursor-intensive workloads |
 
-**Blocker:** `serverStatus` is not accessible via the current read-only MCP interface.
-
-**Recommended path to unblock (Option A):**
+**Implementation (Option A — delivered v0.5.0):**
 Direct PyMongo `admin.command("serverStatus")` on the monitored cluster — read-only,
-no writes, same credentials as MCP. This is how every production MongoDB monitoring
-tool (Ops Manager, Datadog, New Relic) works. The MCP read-only constraint is a
-tool-layer restriction, not a MongoDB security boundary.
-Implementation: add `MongoDBManager.get_server_status()` → `admin.command("serverStatus")`
-and call it from `HealthCheckRunner._section_operations()`.
+no writes. `MongoDBManager.get_server_status()` exposes this; `HealthCheckRunner._section_operations()`
+consumes it. The MCP `--readOnly` flag guards only the MCP tool layer; it does not
+prevent a separate direct read-only admin command.
 
-Other options:
-- Option B: Atlas Data API (BL-053) — Atlas clusters only
-- Option C: Wait for MCP to expose `runCommand` in read-only mode
+**Delivered signals:**
+- Throughput: total reads, writes, getmores, commands (cumulative since restart)
+- Memory: resident MB, virtual MB
+- CPU: user time (sec cumulative), page faults
+- WiredTiger: cache used/max MB, hit ratio %, pages evicted
+- Lock wait: global lock wait %
+- Query targeting: cluster-level scanned keys/objects, ratio per read, scan-and-order count
 
-**Acceptance criteria:**
-- Operations section renders in the HTML/Markdown/JSON report
-- Removes the "NOT AVAILABLE" placeholder for `#sec-ops`
-- Signals: `reads_per_sec`, `writes_per_sec`, `memory_rss_mb`, `cache_used_pct`,
-  `cache_file_ratio`, `cache_hit_pct`, `lock_wait_pct`, `query_targeting_ratio`
-- Severity WARNING if cache hit ratio < 95% (< 80% = CRITICAL), or lock wait > 5%
-- Severity WARNING if query targeting ratio > 10 (scanned 10× more than returned)
+**Acceptance criteria — met:**
+- ✅ Operations section renders in HTML/Markdown/JSON report
+- ✅ Removes "NOT AVAILABLE" placeholder for `#sec-ops`
+- ✅ Severity WARNING if cache hit ratio < 95% (< 80% = CRITICAL), or lock wait > 5%
+- ✅ Severity WARNING if query targeting ratio > 10, CRITICAL if > 100
 
 ---
 

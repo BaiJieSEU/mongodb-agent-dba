@@ -68,6 +68,7 @@ _SECTION_META: dict[str, tuple[str, str]] = {
     "Query Performance":  ("sec-queries",        "Slow query analysis"),
     "Missing Indexes":    ("sec-indexes",        "Missing indexes"),
     "Unused Indexes":     ("sec-indexes-unused", "Unused indexes"),
+    "Operations":         ("sec-ops",            "Operations"),
 }
 
 _NAV_GROUPS: list[tuple[str, list[tuple[str, str, str | None]]]] = [
@@ -79,7 +80,7 @@ _NAV_GROUPS: list[tuple[str, list[tuple[str, str, str | None]]]] = [
     ("Performance", [
         ("Slow queries",    "sec-queries",     "Query Performance"),
         ("Index analysis",  "sec-indexes",     None),
-        ("Operations",      "sec-ops",         None),
+        ("Operations",      "sec-ops",         "Operations"),
     ]),
     ("Reliability", [
         ("Replication",     "sec-replication", "Replication Health"),
@@ -669,7 +670,7 @@ def _build_content(report: HealthCheckReport) -> str:
         card("Query Performance"),
         card("Missing Indexes"),
         card("Unused Indexes"),
-        _placeholder_section("sec-ops",         "Operations", _OPS_UNAVAILABLE,  "BL-009"),
+        card("Operations"),
         card("Replication Health"),
         _placeholder_section("sec-connections", "Connections", _CONN_UNAVAILABLE, "BL-013"),
         card("Storage & Capacity"),

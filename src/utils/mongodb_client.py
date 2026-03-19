@@ -71,6 +71,19 @@ class MongoDBManager:
             logger.error(f"Failed to get database names: {e}")
             return []
     
+    def get_server_status(self) -> Optional[Dict[str, Any]]:
+        """Return admin.command("serverStatus") from the monitored cluster.
+
+        Read-only admin command — no writes.  Used by HealthCheckRunner §8.
+        Returns None on any error so the caller can degrade gracefully.
+        """
+        try:
+            result = self.monitored_cluster.admin.command("serverStatus")
+            return result
+        except Exception as e:
+            logger.warning(f"serverStatus unavailable: {e}")
+            return None
+
     def test_connections(self) -> Dict[str, bool]:
         """Test both MongoDB connections"""
         results = {}
