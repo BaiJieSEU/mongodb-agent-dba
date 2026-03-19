@@ -1,6 +1,6 @@
 # MongoDB DBA Agent — Product Backlog
 
-Updated: 2026-03-17 (v0.3.0) | Format: Epic → Story → Acceptance criteria
+Updated: 2026-03-19 | Format: Epic → Story → Acceptance criteria
 
 Priority: **P0** = must-have for health-check goal | **P1** = high value | **P2** = medium | **P3** = nice-to-have
 Size: **S** < 1 day | **M** 1–3 days | **L** 3–7 days | **XL** > 7 days
@@ -28,6 +28,8 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-070 | Docker Compose deployment | P0 | L | 8 | 🔲 |
 | BL-009 | Operations health section (serverStatus metrics) | P1 | M | 1 | 🔲 |
 | BL-013 | Connection pool health section | P1 | M | 1 | 🔲 |
+| BL-014 | Scan & sort analysis in Query Performance | P1 | S | 1 | 🔲 |
+| BL-015 | OS / infrastructure metrics (CPU, IOPS, disk queue) | P1 | L | 1 | 🔲 |
 | BL-005 | Current operations tool | P1 | S | 1 | 🔲 |
 | BL-006 | Profiler configuration check | P1 | S | 1 | 🔲 |
 | BL-007 | Duplicate/redundant index detection | P1 | S | 1 | 🔲 |
@@ -54,9 +56,9 @@ When adding or updating an item, re-insert it in the correct position — do not
 **Done:** 11 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-010)
 **Partial:** 2 items (BL-050 — within-cluster multi-DB done; BL-071 — LLM+MongoDB env vars done, full coverage pending)
 **P0:** 4 remaining — scheduler (BL-011), baseline severity (BL-021), typed output (BL-030), Docker (BL-070)
-**P1:** 13 items — high-value once P0 is in place
+**P1:** 15 items — high-value once P0 is in place (includes new BL-014, BL-015)
 **P2–P3:** 9 items — important but not blocking
-**Total:** 37 items across 8 epics (11 done, 2 partial, 24 remaining)
+**Total:** 39 items across 8 epics (11 done, 2 partial, 26 remaining)
 
 ---
 
@@ -66,32 +68,53 @@ When adding or updating an item, re-insert it in the correct position — do not
 
 ---
 
-### BL-009 · Operations health section
+### BL-009 · Operations health section (serverStatus metrics)
 **Priority:** P1 | **Size:** M
 
 **Story:** As a DBA, I want an Operations section in the health check report showing
-throughput, lock wait time, and WiredTiger cache stats so I can spot performance
-degradation between index and profiler data.
+throughput, CPU, memory, lock wait time, WiredTiger cache stats, and query targeting
+ratios so I can spot performance degradation that profiler data alone cannot show.
 
-**Metrics to collect:**
-- Reads/sec, writes/sec, getmore rate
-- Lock wait time (avg ms per op)
-- WiredTiger cache hit rate, bytes in cache, eviction rate
-- Page faults and memory (RSS)
+**Metrics to collect — all from `db.adminCommand("serverStatus")`:**
+
+| Metric | serverStatus path | Why it matters |
+|---|---|---|
+| Reads/sec, Writes/sec | `opcounters.query / insert / update / delete` | Throughput baseline |
+| CPU time | `extra_info.user_time_us` | Process-level CPU burn |
+| Memory — RSS | `mem.resident` MB | Actual RAM consumed |
+| Memory — virtual | `mem.virtual` MB | Address space, hints at swapping |
+| WiredTiger cache used | `wiredTiger.cache["bytes currently in the cache"]` | Cache pressure |
+| WiredTiger cache max | `wiredTiger.cache["maximum bytes configured"]` | Capacity ceiling |
+| Cache hit ratio | `1 - pages_read_from_disk / pages_requested` | Key health indicator |
+| Cache file (disk read ratio) | `pages read into cache / pages requested from the cache` | I/O pressure from cache misses |
+| WiredTiger evictions | `wiredTiger.cache["unmodified pages evicted"]` | Eviction pressure |
+| Lock wait time | `locks.Global.acquireWaitCount / acquireCount` | Contention indicator |
+| Cluster-level query targeting | `metrics.queryExecutor.scanned / scannedObjects` | Index efficiency at cluster scale |
+| Cluster-level scan & sort count | `metrics.operation.scanAndOrder` | In-memory sort pressure |
+| Page faults | `extra_info.page_faults` | Memory subsystem pressure |
+| Getmore rate | `opcounters.getmore` | Cursor-intensive workloads |
 
 **Blocker:** `serverStatus` is not accessible via the current read-only MCP interface.
 
-**Options to unblock:**
-- Option A: Direct PyMongo read from monitored cluster (read-only, admin db) — needs
-  security review since it bypasses MCP read-only enforcement
-- Option B: Atlas Data API integration (see BL-053) — Atlas clusters only
-- Option C: Wait for MCP server to expose `runCommand` in read-only mode
+**Recommended path to unblock (Option A):**
+Direct PyMongo `admin.command("serverStatus")` on the monitored cluster — read-only,
+no writes, same credentials as MCP. This is how every production MongoDB monitoring
+tool (Ops Manager, Datadog, New Relic) works. The MCP read-only constraint is a
+tool-layer restriction, not a MongoDB security boundary.
+Implementation: add `MongoDBManager.get_server_status()` → `admin.command("serverStatus")`
+and call it from `HealthCheckRunner._section_operations()`.
+
+Other options:
+- Option B: Atlas Data API (BL-053) — Atlas clusters only
+- Option C: Wait for MCP to expose `runCommand` in read-only mode
 
 **Acceptance criteria:**
-- Operations section renders in the HTML report between Index Analysis and Replication
+- Operations section renders in the HTML/Markdown/JSON report
 - Removes the "NOT AVAILABLE" placeholder for `#sec-ops`
-- Signals: `reads_per_sec`, `writes_per_sec`, `lock_wait_ms`, `cache_hit_pct`
-- Severity WARNING if cache hit rate < 80% or lock wait > 20ms
+- Signals: `reads_per_sec`, `writes_per_sec`, `memory_rss_mb`, `cache_used_pct`,
+  `cache_file_ratio`, `cache_hit_pct`, `lock_wait_pct`, `query_targeting_ratio`
+- Severity WARNING if cache hit ratio < 95% (< 80% = CRITICAL), or lock wait > 5%
+- Severity WARNING if query targeting ratio > 10 (scanned 10× more than returned)
 
 ---
 
@@ -116,6 +139,67 @@ accessible via the current read-only MCP interface (same blocker as BL-009).
 - Removes the "NOT AVAILABLE" placeholder for `#sec-connections`
 - Signals: `current_connections`, `max_connections`, `connection_utilisation_pct`
 - Severity WARNING if utilisation > 70%, CRITICAL if > 90%
+
+---
+
+### BL-014 · Scan & sort analysis in Query Performance (§5)
+**Priority:** P1 | **Size:** S
+
+**Story:** As a DBA, I want §5 Query Performance to flag queries that required an
+in-memory sort stage or spilled to disk so I can prioritise index changes that
+eliminate expensive sort operations.
+
+**Data source:** `system.profile` documents — available via MCP today, no new tooling needed.
+
+| Field | system.profile path | Meaning |
+|---|---|---|
+| In-memory sort | `hasSortStage: true` | Query sorted in RAM — no index covers the sort |
+| Sort spills | `sortSpills: N` | Sort exceeded memory limit, wrote to disk |
+| Sort spill bytes | `sortSpillBytes: N` | Volume of disk spill |
+| Keys examined | `keysExamined` | Index keys scanned (vs `docsExamined` for documents) |
+| Keys-to-docs ratio | `keysExamined / docsExamined` | > 1 suggests multi-key or sparse index overhead |
+
+**Acceptance criteria:**
+- §5 findings include a "sort stage" summary: count of slow queries with `hasSortStage: true`
+- Sort spills flagged as WARNING (any spill = disk pressure)
+- Recommendations include `createIndex({sortField: 1})` for queries with `hasSortStage: true`
+  where the sort field is extractable from `query.sort`
+- `Signal` added: `queries_with_sort_stage`, `sort_spill_count`
+
+---
+
+### BL-015 · OS / infrastructure metrics (CPU, IOPS, disk queue)
+**Priority:** P1 | **Size:** L
+
+**Story:** As a DBA, I want the health check to include OS-level metrics — CPU utilisation,
+disk IOPS, and disk queue depth — alongside MongoDB metrics so I can diagnose whether
+a performance problem is in MongoDB or in the underlying infrastructure.
+
+**Data sources — outside MongoDB, cannot come from MCP or serverStatus:**
+
+| Metric | Linux source | macOS source | Cloud source |
+|---|---|---|---|
+| CPU utilisation % | `/proc/stat` or `psutil.cpu_percent()` | `psutil.cpu_percent()` | CloudWatch / Azure Monitor / GCP |
+| Disk IOPS (read/write) | `/proc/diskstats` or `psutil.disk_io_counters()` | `psutil.disk_io_counters()` | Cloud provider metrics API |
+| Disk queue depth | `/proc/diskstats` (avgqu-sz) | `iostat -x` | Cloud provider metrics API |
+| Disk utilisation % | `psutil.disk_usage()` | `psutil.disk_usage()` | Cloud provider metrics API |
+
+**Recommended implementation:** `psutil` Python library — cross-platform (Linux, macOS, Windows),
+no external agent required, reads from OS kernel directly. This is the same library used by
+MongoDB Ops Manager's host monitoring agent.
+Add `psutil>=5.9` to `requirements.txt`. Create `src/utils/os_metrics.py`.
+
+**Note:** These metrics describe the MongoDB **host machine**, not the cluster. For
+replica sets, each member needs its own host metrics. For cloud-managed Atlas clusters,
+these are not accessible — use Atlas Data API (BL-053) instead.
+
+**Acceptance criteria:**
+- New `_section_infrastructure()` in `HealthCheckRunner` collects OS metrics via `psutil`
+- Signals: `cpu_utilisation_pct`, `disk_iops_read`, `disk_iops_write`, `disk_queue_depth`
+- Severity WARNING if CPU > 80% sustained, disk queue > 2, or IOPS > 80% of provisioned limit
+- Gracefully skips if `psutil` not installed (imports guarded with try/except)
+- Works on macOS (dev) and Linux (production) — the two target platforms
+- Report shows "infrastructure metrics not available" if psutil absent rather than crashing
 
 ---
 
