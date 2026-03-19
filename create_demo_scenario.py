@@ -229,6 +229,21 @@ def run_slow_queries(db):
         }).limit(100))
         time.sleep(0.15)
 
+    # ── sorted queries — trigger hasSortStage (COLLSCAN + in-memory sort, no index)
+    print("   users: sorted by age (COLLSCAN + in-memory sort, no age index)…")
+    for _ in range(3):
+        list(db.users.find(
+            {"status": random.choice(["active", "inactive"])},
+        ).sort("age", -1).limit(20))
+        time.sleep(0.15)
+
+    print("   orders: sorted by amount (COLLSCAN + in-memory sort, no amount index)…")
+    for _ in range(3):
+        list(db.orders.find(
+            {"status": random.choice(["pending", "shipped"])},
+        ).sort("amount", -1).limit(10))
+        time.sleep(0.15)
+
     print("   ✓ Slow queries complete — system.profile populated")
 
 

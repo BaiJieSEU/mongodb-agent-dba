@@ -439,19 +439,35 @@ class HealthCheckRunner:
             for doc in self._parse_json_docs(blocks):
                 ns = doc.get("ns", "")
                 db_name, collection = ns.split(".", 1) if "." in ns else (db, ns)
+                cmd = doc.get("command", {}) if isinstance(doc.get("command"), dict) else {}
                 slow_queries.append({
-                    "db":         db_name,
-                    "collection": collection,
-                    "query":      doc.get("query", doc.get("command", {})),
-                    "execution_time_ms": doc.get("millis", 0),
-                    "docs_examined":     doc.get("docsExamined", 0),
-                    "docs_returned":     doc.get("nreturned", 0),
-                    "operation":         doc.get("op", "query"),
+                    "db":               db_name,
+                    "collection":       collection,
+                    "query":            doc.get("query", cmd),
+                    "execution_time_ms":    doc.get("millis", 0),
+                    "docs_examined":        doc.get("docsExamined", 0),
+                    "docs_returned":        doc.get("nreturned", 0),
+                    "keys_examined":        doc.get("keysExamined", 0),
+                    "has_sort_stage":       bool(doc.get("hasSortStage", False)),
+                    "sort_spills":          int(doc.get("sortSpills", 0) or 0),
+                    "sort_spill_bytes":     int(doc.get("sortSpillBytes", 0) or 0),
+                    "plan_summary":         doc.get("planSummary", ""),
+                    "planning_time_us":     int(doc.get("planningTimeMicros", 0) or 0),
+                    "num_yield":            int(doc.get("numYield", 0) or 0),
+                    "operation":            doc.get("op", "query"),
+                    "sort_fields":          list(cmd.get("sort", {}).keys())
+                                            if isinstance(cmd.get("sort"), dict) else [],
                 })
 
         count  = len(slow_queries)
         max_ms = max((q["execution_time_ms"] for q in slow_queries), default=0)
         avg_ms = sum(q["execution_time_ms"] for q in slow_queries) / count if count else 0.0
+
+        # Scan & sort aggregate metrics
+        collscan_count    = sum(1 for q in slow_queries if "COLLSCAN" in q["plan_summary"])
+        sort_stage_count  = sum(1 for q in slow_queries if q["has_sort_stage"])
+        sort_spill_count  = sum(1 for q in slow_queries if q["sort_spills"] > 0)
+        total_spill_bytes = sum(q["sort_spill_bytes"] for q in slow_queries)
 
         if count == 0:
             severity = HealthSeverity.OK
@@ -459,6 +475,9 @@ class HealthCheckRunner:
             severity = HealthSeverity.CRITICAL
         else:
             severity = HealthSeverity.WARNING
+        # Sort spills are always at least WARNING — spilling to disk indicates memory pressure
+        if sort_spill_count > 0:
+            severity = worst_severity([severity, HealthSeverity.WARNING])
 
         by_coll: Dict[str, List[Dict]] = {}
         for q in slow_queries:
@@ -469,24 +488,53 @@ class HealthCheckRunner:
             findings.append(f"No slow queries above {threshold}ms — profiler is active.")
         else:
             findings.append(
-                f"{count} slow op(s)  threshold: {threshold}ms  max: {max_ms}ms  avg: {avg_ms:.0f}ms"
+                f"{count} slow op(s)  ·  threshold: {threshold}ms  "
+                f"·  max: {max_ms}ms  ·  avg: {avg_ms:.0f}ms"
             )
-            for coll, qs in sorted(by_coll.items(), key=lambda x: -len(x[1])):
-                c_max  = max(q["execution_time_ms"] for q in qs)
-                c_avg  = sum(q["execution_time_ms"] for q in qs) / len(qs)
-                c_exam = max(q["docs_examined"] for q in qs)
+            findings.append(
+                f"{collscan_count} of {count} op(s) used COLLSCAN (no index)  "
+                f"·  {sort_stage_count} required in-memory sort stage"
+                + (f"  ·  {sort_spill_count} sort(s) spilled to disk "
+                   f"({total_spill_bytes / 1024:.0f} KB)" if sort_spill_count else "")
+            )
+            if sort_spill_count:
                 findings.append(
-                    f"  {coll}: {len(qs)} op(s)  max {c_max}ms  avg {c_avg:.0f}ms  "
-                    f"up to {c_exam:,} docs examined"
+                    f"  Sort spills detected — queries exceeded in-memory sort buffer. "
+                    f"Add indexes that cover the sort field to eliminate in-memory sorting."
+                )
+            findings.append("")
+            for coll, qs in sorted(by_coll.items(), key=lambda x: -len(x[1])):
+                c_max    = max(q["execution_time_ms"] for q in qs)
+                c_avg    = sum(q["execution_time_ms"] for q in qs) / len(qs)
+                c_exam   = max(q["docs_examined"] for q in qs)
+                c_ret    = max(q["docs_returned"] for q in qs) if any(q["docs_returned"] for q in qs) else 0
+                c_keys   = max(q["keys_examined"] for q in qs)
+                c_plans  = {q["plan_summary"] for q in qs if q["plan_summary"]}
+                c_sorts  = sum(1 for q in qs if q["has_sort_stage"])
+                # Targeting ratio: docs scanned per doc returned (lower = better)
+                targeting = round(c_exam / c_ret, 1) if c_ret else float("inf")
+                targeting_str = f"{targeting:,.0f}×" if targeting != float("inf") else "∞"
+                plan_str = " / ".join(sorted(c_plans)) if c_plans else "unknown"
+                sort_str = f"  sort stage: {c_sorts}/{len(qs)} op(s)" if c_sorts else ""
+                findings.append(
+                    f"  {coll}  [{len(qs)} op(s)  max {c_max}ms  avg {c_avg:.0f}ms]"
+                )
+                findings.append(
+                    f"    plan: {plan_str}  ·  "
+                    f"docs examined: {c_exam:,}  ·  keys examined: {c_keys:,}  ·  "
+                    f"targeting ratio: {targeting_str}{sort_str}"
                 )
 
         return ReportSection(
             name="Query Performance",
             severity=severity,
             signals=[
-                Signal("slow_query_count",  count,             "queries", _THRESHOLDS["slow_query_count_warning"]),
-                Signal("max_execution_ms",  max_ms,            "ms",      _THRESHOLDS["slow_query_ms_warning"]),
-                Signal("avg_execution_ms",  round(avg_ms, 1),  "ms"),
+                Signal("slow_query_count",   count,            "queries", _THRESHOLDS["slow_query_count_warning"]),
+                Signal("collscan_count",      collscan_count,   "queries", 0),
+                Signal("sort_stage_count",    sort_stage_count, "queries", 0),
+                Signal("sort_spill_count",    sort_spill_count, "queries", 0),
+                Signal("max_execution_ms",    max_ms,           "ms",      _THRESHOLDS["slow_query_ms_warning"]),
+                Signal("avg_execution_ms",    round(avg_ms, 1), "ms"),
             ],
             findings=findings,
         ), slow_queries
@@ -706,15 +754,25 @@ class HealthCheckRunner:
             returned    = best.get("docs_returned", 0)
             ms          = best.get("execution_time_ms", 0)
             selectivity = returned / examined if examined else 1.0
+            sort_fields = best.get("sort_fields", [])
+            has_sort    = best.get("has_sort_stage", False)
 
-            # Derive the database from slow_queries ns field if available, else "testdb"
-            db_label = best.get("db", "testdb")
-            fq_coll  = f"{db_label}.{coll}"
+            db_label = best.get("db", "")
+            fq_coll  = f"{db_label}.{coll}" if db_label else coll
 
-            if best_fields:
-                index_spec = ", ".join(f'"{f}": 1' for f in best_fields[:2])
-                action     = f"db.{coll}.createIndex({{{index_spec}}})"
-                confidence = "high"
+            # Build index spec: filter fields (ESR: equality first) then sort field
+            if best_fields or sort_fields:
+                # Include up to 2 filter fields then up to 1 sort field (ESR pattern)
+                index_parts = {f: 1 for f in best_fields[:2]}
+                if sort_fields:
+                    sf = sort_fields[0]
+                    if sf not in index_parts:
+                        index_parts[sf] = 1  # direction preserved from sort if needed
+                index_spec = ", ".join(f'"{k}": 1' for k in index_parts)
+                action = f"db.{coll}.createIndex({{{index_spec}}})"
+                if has_sort and sort_fields:
+                    action += f"  // covers filter + eliminates in-memory sort on {sort_fields[0]}"
+                confidence = "high" if best_fields else "medium"
             else:
                 action     = (
                     f"db.{coll}.createIndex({{\"<field>\": 1}})  "
@@ -722,13 +780,18 @@ class HealthCheckRunner:
                 )
                 confidence = "medium"
 
+            sort_note = (
+                f"; has_sort_stage=true (sort on {sort_fields[0]} done in memory)"
+                if has_sort and sort_fields else
+                f"; has_sort_stage=true" if has_sort else ""
+            )
             recs.append(Recommendation(
                 priority="high",
                 collection=fq_coll,
                 action=action,
                 evidence=(
                     f"{examined:,} docs examined, {returned} returned ({ms}ms) — "
-                    f"selectivity {selectivity:.4f}, likely full collection scan"
+                    f"targeting ratio {examined / returned:.0f}× · COLLSCAN{sort_note}"
                 ),
                 confidence=confidence,
             ))
