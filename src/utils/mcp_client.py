@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import queue
+import shutil
 import threading
 from typing import Any, Dict, List
 
@@ -17,9 +18,19 @@ from mcp.client.stdio import stdio_client
 
 logger = logging.getLogger(__name__)
 
-NODE_PATH = os.path.expanduser("~/.nvm/versions/node/v24.14.0/bin/node")
-MCP_SERVER_PATH = os.path.expanduser(
-    "~/.nvm/versions/node/v24.14.0/bin/mongodb-mcp-server"
+# Resolve Node and MCP server paths:
+# 1. Explicit env var override (Docker / CI)
+# 2. PATH lookup (npm global install, Docker image)
+# 3. NVM local dev fallback
+NODE_PATH = (
+    os.environ.get("AGENT_NODE_PATH")
+    or shutil.which("node")
+    or os.path.expanduser("~/.nvm/versions/node/v24.14.0/bin/node")
+)
+MCP_SERVER_PATH = (
+    os.environ.get("AGENT_MCP_SERVER_PATH")
+    or shutil.which("mongodb-mcp-server")
+    or os.path.expanduser("~/.nvm/versions/node/v24.14.0/bin/mongodb-mcp-server")
 )
 
 _STOP = object()       # sentinel: end the session

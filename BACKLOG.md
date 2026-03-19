@@ -25,7 +25,7 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-010 | Health check pipeline | P0 | L | 2 | ✅ Done |
 | BL-011 | Configurable scheduler | P0 | L | 2 | 🔲 |
 | BL-030 | Structured tool output (typed) | P0 | L | 4 | 🔲 |
-| BL-070 | Docker Compose deployment | P0 | L | 8 | 🔲 |
+| BL-070 | Docker Compose deployment | P0 | L | 8 | ✅ Done |
 | BL-009 | Operations health section (serverStatus metrics) | P1 | M | 1 | ✅ Done |
 | BL-013 | Connection pool health section | P1 | M | 1 | 🔲 |
 | BL-014 | Scan & sort analysis in Query Performance | P1 | S | 1 | ✅ Done |
@@ -54,9 +54,9 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
 | BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
 
-**Done:** 14 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014, BL-009, BL-034)
+**Done:** 15 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014, BL-009, BL-034, BL-070)
 **Partial:** 2 items (BL-050 — within-cluster multi-DB done; BL-071 — LLM+MongoDB env vars done, full coverage pending)
-**P0:** 4 remaining — scheduler (BL-011), baseline severity (BL-021), typed output (BL-030), Docker (BL-070)
+**P0:** 3 remaining — scheduler (BL-011), baseline severity (BL-021), typed output (BL-030)
 **P1:** 16 items — high-value once P0 is in place (includes BL-034 LLM recommendations)
 **P2–P3:** 9 items — important but not blocking
 **Total:** 40 items across 8 epics (13 done, 2 partial, 25 remaining)

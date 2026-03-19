@@ -1,0 +1,111 @@
+# MongoDB DBA Agent — Docker Compose
+#
+# Usage:
+#
+#   Cloud LLM (Anthropic / Azure / Bedrock):
+#     cp .env.example .env   # set AGENT_LLM_PROVIDER + API key
+#     docker compose up
+#
+#   Local Ollama (data sovereignty):
+#     cp .env.example .env   # set AGENT_LLM_PROVIDER=ollama
+#     docker compose --profile ollama up
+#     docker exec -it ollama ollama pull qwen3:8b   # first run only
+#     docker compose --profile ollama run --rm agent
+#
+#   Local demo (no external cluster, no API key):
+#     docker compose --profile ollama --profile demo up -d
+#     docker exec -it ollama ollama pull qwen3:8b   # first run only
+#     docker compose --profile ollama --profile demo run --rm agent
+#
+#   Production (customer cluster):
+#     Set AGENT_MONGO_CLUSTER=mongodb://your-cluster/ in .env
+#     docker compose up   (mongo-monitored not started — not in default profile)
+#
+#   Agentic investigation:
+#     docker compose run --rm agent python src/main_agentic.py "my database is slow"
+
+services:
+
+  # ── Agent memory store ──────────────────────────────────────────────────────
+  # Stores agent investigations, performance issues, and user context.
+  # Never exposed on the host — accessed only by the agent container.
+  mongo-memory:
+    image: mongo:8.0
+    container_name: mongo-memory
+    restart: unless-stopped
+    expose:
+      - "27017"
+    volumes:
+      - mongo_memory_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Demo monitored cluster (local dev / demo only) ──────────────────────────
+  # Start with: docker compose --profile demo up
+  # In production, set AGENT_MONGO_CLUSTER in .env and omit this profile.
+  mongo-monitored:
+    image: mongo:8.0
+    container_name: mongo-monitored
+    profiles: ["demo"]
+    restart: unless-stopped
+    ports:
+      - "27018:27017"   # Expose on host for direct mongosh / Compass access
+    volumes:
+      - mongo_monitored_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "--quiet"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Ollama local LLM ────────────────────────────────────────────────────────
+  # Start with: docker compose --profile ollama up
+  # After first start, pull the model: docker exec -it ollama ollama pull qwen3:8b
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    profiles: ["ollama"]
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:11434/api/tags"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── DBA Agent ───────────────────────────────────────────────────────────────
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mongodb-dba-agent
+    restart: "no"   # one-shot: exits after writing the health check report
+    env_file:
+      - .env
+    environment:
+      # Always connect to the internal Docker memory store — do not override in .env
+      AGENT_MONGO_STORE: "mongodb://mongo-memory:27017"
+      # Default to demo cluster; set AGENT_MONGO_CLUSTER in .env for production
+      AGENT_MONGO_CLUSTER: "${AGENT_MONGO_CLUSTER:-mongodb://mongo-monitored:27017}"
+      # When using Ollama profile, point to the internal container
+      AGENT_OLLAMA_URL: "${AGENT_OLLAMA_URL:-http://ollama:11434}"
+    volumes:
+      # Reports (JSON + HTML) written here; accessible on host after container exits
+      - ./reports:/app/reports
+    depends_on:
+      mongo-memory:
+        condition: service_healthy
+
+volumes:
+  mongo_memory_data:
+  mongo_monitored_data:
+  ollama_data:

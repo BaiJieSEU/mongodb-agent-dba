@@ -9,7 +9,7 @@ Current version covers: cluster overview, server health, replication health, sto
 capacity, query performance, missing indexes, unused indexes. Dynamically discovers all
 databases in the cluster — no hardcoded database names. JSON + HTML reports produced
 on every run. Next P0 items: scheduler (BL-011), baseline-aware severity (BL-021),
-typed tool output (BL-030), Docker deployment (BL-070).
+typed tool output (BL-030).
 See [REQUIREMENTS.md](REQUIREMENTS.md) and [BACKLOG.md](BACKLOG.md).
 
 ---
@@ -170,7 +170,6 @@ only the MCP tool layer; it does not prevent a separate direct read-only admin c
 | Scheduler | BL-011 (P0/L) | APScheduler or `schedule` lib; `--daemon` CLI flag |
 | Baseline-aware severity | BL-021 (P0/M) | Compare metrics to cluster's own history, not static thresholds |
 | Typed tool output | BL-030 (P0/L) | Replace string-parsing with dataclasses; LLM gets clean JSON |
-| Docker deployment | BL-070 (P0/L) | `docker compose up` — Python + Node + MongoDB + optional Ollama |
 | Env var config (full) | BL-071 (P0/S, partial) | LLM + MongoDB vars done; schedule/threshold vars pending |
 
 ---
