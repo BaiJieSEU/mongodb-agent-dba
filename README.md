@@ -1,150 +1,200 @@
 # MongoDB DBA Agent
 
-Agentic AI system for MongoDB cluster health monitoring. Performs comprehensive,
-schedulable cluster health checks and answers natural language queries — backed by
-persistent memory that learns from past investigations.
+AI-augmented MongoDB cluster health monitor. Runs a comprehensive 8-section health
+check, produces JSON + HTML reports with prioritised recommendations, and answers
+natural language queries — backed by persistent memory that learns from past
+investigations.
 
-## Product Goal
+## Current Capabilities (v0.5.0)
 
-> Run a complete MongoDB cluster health check automatically on a schedule, produce a
-> structured report with findings and recommendations, and store results for trend analysis.
+| Health check dimension | Status |
+|---|---|
+| Cluster overview (databases, collections) | ✅ |
+| Server health (startup log, db stats) | ✅ |
+| Replication health (oplog window, member state) | ✅ |
+| Storage & capacity (data size, index size, growth) | ✅ |
+| Query performance (slow queries, scan & sort detection) | ✅ |
+| Missing index recommendations | ✅ |
+| Unused index detection | ✅ |
+| Operations (throughput, memory, cache hit ratio, lock wait) | ✅ |
+| LLM-enriched cross-section recommendations | ✅ |
+| HTML + JSON report output | ✅ |
+| Agentic natural language investigation | ✅ |
+| Configurable schedule (daemon mode) | 🔲 BL-011 |
 
-The agent is an **AI-augmented DBA tool** — it owns the observe-and-diagnose loop so
-the human DBA can focus on remediation and decisions that require operational context.
-See [REQUIREMENTS.md](REQUIREMENTS.md) for the full scope and [BACKLOG.md](BACKLOG.md)
-for the prioritised roadmap.
+## Quick Start — Docker (recommended)
 
-## Current Capabilities (v0.2.0)
+The fastest path to a running deployment. Requires only Docker and Docker Compose.
 
-| Health check dimension | v0.2.0 | Planned |
+```bash
+git clone https://github.com/BaiJieSEU/mongodb-agent-dba
+cd mongodb-agent-dba
+cp .env.example .env
+```
+
+Edit `.env` and choose your LLM provider, then:
+
+**Cloud LLM (Anthropic / Azure / Bedrock):**
+```bash
+# Set AGENT_ANTHROPIC_API_KEY (or Azure/Bedrock equivalent) in .env
+# Set AGENT_MONGO_CLUSTER to your target cluster URI in .env
+docker compose up
+# Reports appear in ./reports/ when the agent exits
+open $(ls -t reports/*.html | head -1)
+```
+
+**Local Ollama (data sovereignty — no data leaves the machine):**
+```bash
+# Set AGENT_LLM_PROVIDER=ollama in .env
+docker compose --profile ollama up -d
+docker exec -it ollama ollama pull qwen3:8b   # first run only (~5 GB)
+docker compose --profile ollama run --rm agent
+open $(ls -t reports/*.html | head -1)
+```
+
+**Full local demo (no external cluster, no API key):**
+```bash
+# Set AGENT_LLM_PROVIDER=ollama in .env
+docker compose --profile ollama --profile demo up -d
+docker exec -it ollama ollama pull qwen3:8b   # first run only
+# Optionally generate demo slow-query data:
+docker compose --profile ollama --profile demo run --rm agent \
+  python create_demo_scenario.py
+docker compose --profile ollama --profile demo run --rm agent
+open $(ls -t reports/*.html | head -1)
+```
+
+## Quick Start — Local (manual install)
+
+```bash
+# Prerequisites: Python 3.10+, Node 18+, MongoDB 8.0+, Ollama
+git clone https://github.com/BaiJieSEU/mongodb-agent-dba
+cd mongodb-agent-dba
+python3 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+npm install -g @mongodb-js/mongodb-mcp-server
+
+# Start MongoDB instances (agent memory store + monitored cluster)
+mongod --config ~/mongodb/config/mongod.conf   # port 27017
+mongod --config ~/mongodb/config/mongod2.conf  # port 27018
+
+# Start Ollama and pull model
+brew services start ollama
+ollama pull qwen3:8b
+
+# Generate demo data
+python create_demo_scenario.py
+```
+
+## Usage
+
+```bash
+source venv/bin/activate
+
+# Full cluster health check → reports/health_*.json + reports/health_*.html
+python src/main_agentic.py --health-check
+open $(ls -t reports/*.html | head -1)
+
+# Natural language investigation
+python src/main_agentic.py "my database is slow"
+python src/main_agentic.py "what indexes does the users collection have"
+python src/main_agentic.py "how many collections do I have"
+```
+
+## Configuration
+
+Copy `.env.example` to `.env` and set at minimum:
+
+| Variable | Required | Description |
 |---|---|---|
-| Slow query identification | ✅ `system.profile` via MCP | — |
-| Query execution plan analysis | ✅ MCP `explain` | aggregation pipelines |
-| Index inventory | ✅ MCP `collection-indexes` | usage stats, duplicate detection |
-| Database / collection metadata | ✅ MCP `list-*` | storage stats, growth trends |
-| Server & connection health | ❌ | `serverStatus` (BL-001) |
-| Replication health | ❌ | `replSetGetStatus` (BL-002) |
-| Current operations | ❌ | `currentOp` (BL-005) |
-| Scheduling | ❌ | configurable cron (BL-011) |
-| Structured report output | ❌ | JSON + severity (BL-020) |
+| `AGENT_LLM_PROVIDER` | Yes | `ollama` \| `anthropic` \| `azure_openai` \| `bedrock` |
+| `AGENT_MONGO_CLUSTER` | For prod | URI of the monitored cluster |
+| `AGENT_ANTHROPIC_API_KEY` | If anthropic | Anthropic API key |
+| `AGENT_AZURE_OPENAI_KEY` | If azure | Azure OpenAI key |
+| `AWS_ACCESS_KEY_ID` | If bedrock | AWS credentials |
+
+Full `config/agent_config.yaml` schema:
+
+```yaml
+mongodb:
+  agent_store: "mongodb://localhost:27017"       # agent memory
+  monitored_cluster: "mongodb://localhost:27018" # target cluster
+
+llm:
+  provider: "ollama"   # override: AGENT_LLM_PROVIDER
+
+  ollama:
+    base_url: "http://localhost:11434"
+    model: "qwen3:8b"
+
+  anthropic:
+    model: "claude-sonnet-4-6"
+
+  azure_openai:
+    endpoint: ""
+    deployment: ""
+
+  bedrock:
+    model_id: "anthropic.claude-3-sonnet-20240229-v1:0"
+    region: "us-east-1"
+
+agent:
+  slow_query_threshold_ms: 5
+  llm_recommendations: true   # LLM cross-section recommendation enrichment
+```
+
+All `agent_config.yaml` values can be overridden via `AGENT_*` env vars. See `.env.example`.
 
 ## Architecture
 
-![Architecture Diagram](architecture.svg)
+Two execution paths share the same config and MongoDB connection layer:
 
 ```
-User Query / Scheduler
-        │
-        ▼
-main_agentic.py          ← Rich console, arg parsing, prerequisite checks
-        │
-        ▼
+python src/main_agentic.py --health-check        → Deterministic 8-section pipeline
+python src/main_agentic.py "my db is slow"       → LLM-driven agentic investigation
+```
+
+### Health Check Pipeline (deterministic)
+
+```
+HealthCheckRunner
+  §1 Cluster Overview     → MCP: list-databases, list-collections
+  §2 Server Health        → MCP: find on local.startup_log, db-stats
+  §3 Replication Health   → MCP: find on local.system.replset, local.oplog.rs
+  §4 Storage & Capacity   → MCP: db-stats, collection-storage-size, count
+  §5 Query Performance    → MCP: find on system.profile (all discovered DBs)
+  §6 Missing Indexes      → MCP: collection-indexes on top slow collections
+  §7 Unused Indexes       → MCP: aggregate $indexStats (all DBs)
+  §8 Operations           → Direct PyMongo: admin.command("serverStatus")
+       ↓
+  Rule-based recommendations
+       ↓
+  LLMRecommender.enrich()   (cross-section insights; fails silently)
+       ↓
+  reports/health_YYYY-MM-DD_HH-MM-SS.json
+  reports/health_YYYY-MM-DD_HH-MM-SS.html
+```
+
+### Agentic Path (LLM-driven)
+
+```
 IntelligentAgenticDBAAgent
-  ├─ classify_user_intent()      ← LLM: DIRECT_ANSWER | DATABASE_METADATA
-  │                                        | PERFORMANCE_ANALYSIS | COMPLEX_INVESTIGATION
-  ├─ get_investigation_context() ← AgentMemory: past investigations + recurring issues
-  ├─ select_tools_intelligently() ← LLM: ordered investigation plan
-  ├─ execute_tool()              ← MCPClient → MongoDB MCP Server (read-only)
-  │     ├─ list_collections      → MCP: list-collections
-  │     ├─ list_databases        → MCP: list-databases
-  │     ├─ fetch_slow_queries    → MCP: find on system.profile
-  │     ├─ explain_query         → MCP: explain
-  │     └─ check_indexes         → MCP: collection-indexes
-  ├─ generate_final_response()   ← LLM: synthesise with memory context
-  └─ store_investigation()       ← AgentMemory: persist findings + recurring issues
+  classify_user_intent()        ← LLM
+  get_investigation_context()   ← AgentMemory (past investigations)
+  select_tools_intelligently()  ← LLM: ordered tool plan
+  execute_tool()                ← MCPClient → MongoDB MCP Server (read-only)
+  generate_final_response()     ← LLM + memory context
+  store_investigation()         ← AgentMemory (TTL persistence)
 ```
 
 ### Infrastructure
 
 | Component | Role | Port |
 |---|---|---|
-| Ollama + qwen2.5-coder:7b | Local LLM reasoning | 11434 |
-| MongoDB MCP Server | Read-only cluster operations | stdio |
-| MongoDB — agent store | Investigation memory (TTL) | 27017 |
+| MongoDB MCP Server | Read-only cluster tool execution | stdio |
+| MongoDB — agent store | Investigation memory (TTL indexes) | 27017 |
 | MongoDB — monitored cluster | Target cluster under analysis | 27018 |
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.10+
-- Node.js 18+ (for MongoDB MCP Server)
-- MongoDB 8.0+ (two instances)
-- Ollama with `qwen2.5-coder:7b`
-
-### Installation
-
-```bash
-# 1. Clone and create environment
-git clone https://github.com/BaiJieSEU/mongodb-agent-dba
-cd mongodb-agent-dba
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-
-# 2. Install MongoDB MCP Server
-npm install -g @mongodb-js/mongodb-mcp-server
-
-# 3. Start MongoDB instances
-mongod --config ~/mongodb/config/mongod.conf   # agent memory  (27017)
-mongod --config ~/mongodb/config/mongod2.conf  # monitored DB  (27018)
-
-# 4. Start Ollama
-brew services start ollama
-ollama pull qwen2.5-coder:7b
-
-# 5. Generate demo data and slow queries
-python create_demo_scenario.py
-```
-
-### Usage
-
-```bash
-source venv/bin/activate
-
-# Performance investigation
-python src/main_agentic.py "my database is slow"
-
-# Metadata queries
-python src/main_agentic.py "how many collections do I have"
-python src/main_agentic.py "what indexes does my users collection have"
-
-# Full health check (currently runs performance + index analysis)
-python src/main_agentic.py "run a health check on my cluster"
-```
-
-## Configuration
-
-`config/agent_config.yaml`:
-
-```yaml
-mongodb:
-  agent_store: "mongodb://localhost:27017"       # memory storage
-  monitored_cluster: "mongodb://localhost:27018" # target cluster
-
-ollama:
-  base_url: "http://localhost:11434"
-  model: "qwen2.5-coder:7b"
-
-agent:
-  slow_query_threshold_ms: 5
-  max_queries_to_analyze: 10
-  investigation_timeout: 60
-
-# Coming in BL-011 / BL-021:
-# schedule:
-#   enabled: true
-#   cron: "0 */6 * * *"
-#   report_output: file
-#   alert_on_severity: warning
-#   alert_webhook_url: "https://hooks.slack.com/..."
-#
-# health_check:
-#   thresholds:
-#     replication_lag_warning_s: 60
-#     connection_utilisation_warning_pct: 80
-#     slow_query_count_warning: 10
-#     oplog_window_warning_hours: 24
-```
+| Ollama / Anthropic / Azure / Bedrock | LLM reasoning | 11434 or cloud |
 
 ## Project Structure
 
@@ -152,26 +202,33 @@ agent:
 mongodb-agent-dba/
 ├── src/
 │   ├── agent/
-│   │   └── intelligent_agentic_agent.py  # Core AI agent + MCP tool dispatch
+│   │   ├── health_check_runner.py        # Deterministic 8-section health check
+│   │   ├── llm_recommender.py            # LLM cross-section recommendation enrichment
+│   │   └── intelligent_agentic_agent.py  # LLM-driven agentic investigation
 │   ├── memory/
-│   │   └── agent_memory.py               # MongoDB-based persistent memory
-│   ├── utils/
-│   │   ├── mcp_client.py                 # Sync wrapper around MongoDB MCP Server
-│   │   ├── mongodb_client.py             # Agent store connection (PyMongo)
-│   │   └── config_loader.py             # YAML configuration
-│   └── main_agentic.py                   # CLI entry point
+│   │   └── agent_memory.py               # MongoDB-backed persistent memory (TTL)
+│   ├── models/
+│   │   └── health_check_report.py        # Typed report schema
+│   └── utils/
+│       ├── html_reporter.py              # Self-contained HTML report renderer
+│       ├── mcp_client.py                 # Sync MCP client wrapper
+│       ├── mongodb_client.py             # Agent store + serverStatus connection
+│       ├── config_loader.py              # YAML config + AGENT_* env var overrides
+│       └── llm_factory.py               # Multi-provider LLM builder
 ├── config/
 │   └── agent_config.yaml                # Runtime configuration
-├── architecture.svg                     # Architecture diagram
-├── CHANGELOG.md                         # Version history
-├── REQUIREMENTS.md                      # Product scope and honest capability assessment
-├── BACKLOG.md                           # Prioritised roadmap (26 items, 6 epics)
-└── create_demo_scenario.py              # Generates test data + slow profiler entries
+├── Dockerfile                           # Python 3.11 + Node 20 + MCP server
+├── docker-compose.yml                   # Four-service stack with profiles
+├── .env.example                         # All configurable env vars (copy to .env)
+├── reports/                             # JSON + HTML health check output
+├── REQUIREMENTS.md                      # Product scope + capability assessment
+├── BACKLOG.md                           # Prioritised roadmap
+└── create_demo_scenario.py              # Generates testdb with slow queries
 ```
 
 ## Memory System
 
-Investigations are stored in the `agent_memory` database (port 27017):
+Investigations persist in the `agent_memory` database (port 27017):
 
 | Collection | Content | TTL |
 |---|---|---|
@@ -179,21 +236,8 @@ Investigations are stored in the `agent_memory` database (port 27017):
 | `performance_issues` | Recurring slow query tracking | 90 days |
 | `user_context` | Patterns and preferences | — |
 
-The agent references this history in new investigations — "I see this collection was slow
-last week too…" — and tracks recurring issues across sessions.
-
-## MCP Tool Mapping
-
-All database operations on the monitored cluster go through the MongoDB MCP Server
-in read-only mode. No direct writes to the monitored cluster.
-
-| Agent tool | MCP operation | Purpose |
-|---|---|---|
-| `list_collections` | `list-collections` | Collections in a database |
-| `list_databases` | `list-databases` | All available databases |
-| `fetch_slow_queries` | `find` on `system.profile` | Slow query profiler data |
-| `explain_query` | `explain` | Query execution plan |
-| `check_indexes` | `collection-indexes` | Index inventory per collection |
+The agentic path references this history in new investigations — "I see this
+collection was slow last week too…" — and tracks recurring issues across sessions.
 
 ## License
 
