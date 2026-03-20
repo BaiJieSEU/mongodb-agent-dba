@@ -97,8 +97,10 @@ Add to `.env`:
 AGENT_LLM_PROVIDER=ollama
 ```
 
-No API key needed. Ollama will run as a Docker container on your machine.
-The model (~5 GB) is downloaded automatically the first time you run (see Step 5).
+No API key needed. After Step 5 starts the Ollama container, run this once to download the model (~5 GB):
+```bash
+docker exec -it ollama ollama pull qwen3:8b
+```
 
 ---
 
@@ -133,14 +135,14 @@ docker compose --profile demo run --rm agent
 **Option D (Ollama) + your own cluster:**
 ```bash
 docker compose --profile ollama up -d
-docker exec -it ollama ollama pull qwen3:8b  # first run only — downloads ~5 GB model
+# Now run the model pull from Step 3, then:
 docker compose --profile ollama run --rm agent
 ```
 
 **Option D (Ollama) + demo cluster:**
 ```bash
 docker compose --profile ollama --profile demo up -d
-docker exec -it ollama ollama pull qwen3:8b  # first run only — downloads ~5 GB model
+# Now run the model pull from Step 3, then:
 docker compose --profile ollama --profile demo run --rm agent python create_demo_scenario.py  # first run only — seeds demo data
 docker compose --profile ollama --profile demo run --rm agent
 ```
