@@ -22,75 +22,104 @@ investigations.
 | Agentic natural language investigation | ✅ |
 | Configurable schedule (daemon mode) | 🔲 BL-011 |
 
-## Quick Start — Docker (recommended)
+## Quick Start
 
-Requires only Docker and Docker Compose.
+### Step 1 — What you need
+
+To run this agent you need two things:
+
+1. **The app** — a Docker image containing the agent, Node.js, and the MongoDB MCP Server
+2. **An LLM** — the agent uses a language model to reason about the data and generate recommendations
+
+Docker must be installed on your machine. Everything else is handled by Docker Compose.
+
+---
+
+### Step 2 — Install the app
 
 ```bash
 git clone https://github.com/BaiJieSEU/mongodb-agent-dba
 cd mongodb-agent-dba
 cp .env.example .env   # .env is gitignored — your secrets stay local
+docker compose build
 ```
-
-There are **two independent choices** to make in `.env`:
 
 ---
 
-### Choice 1 — Which LLM to use
+### Step 3 — Set up your LLM
 
-**Option A: A cloud API (Anthropic, Azure OpenAI, or AWS Bedrock)**
+Pick one option and add the corresponding lines to `.env`:
 
-Add your API key to `.env`:
+**Anthropic API**
 ```
 AGENT_LLM_PROVIDER=anthropic
 AGENT_ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-Run command: `docker compose up`
+**Azure OpenAI**
+```
+AGENT_LLM_PROVIDER=azure_openai
+AGENT_AZURE_OPENAI_KEY=...
+AGENT_AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com/
+AGENT_AZURE_OPENAI_DEPLOYMENT=gpt-4o
+```
 
-**Option B: Ollama running locally (no data sent to the cloud)**
+**AWS Bedrock**
+```
+AGENT_LLM_PROVIDER=bedrock
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_DEFAULT_REGION=us-east-1
+```
 
-Add to `.env`:
+**Ollama (local — no data sent to the cloud, ~5 GB model download)**
 ```
 AGENT_LLM_PROVIDER=ollama
 ```
-
-Run command: `docker compose --profile ollama up -d` (starts an Ollama container)
-First time only: `docker exec -it ollama ollama pull qwen3:8b` (~5 GB download)
+Ollama runs as a Docker container alongside the agent. Start it with the `--profile ollama` flag (see Step 5). Pull the model on first run:
+```bash
+docker exec -it ollama ollama pull qwen3:8b
+```
 
 ---
 
-### Choice 2 — Which MongoDB cluster to analyse
+### Step 4 — Connect to MongoDB
 
-**Option A: Your own MongoDB cluster**
-
-Add to `.env`:
+Add your cluster URI to `.env`:
 ```
 AGENT_MONGO_CLUSTER=mongodb+srv://user:pass@your-cluster.mongodb.net/
 ```
 
-**Option B: A built-in demo cluster (no real cluster needed)**
-
-Leave `AGENT_MONGO_CLUSTER` unset, and add `--profile demo` to your run command.
-Seed it with demo data on first run:
+No real cluster? Use the built-in demo cluster instead — just leave `AGENT_MONGO_CLUSTER` unset and add `--profile demo` to the run command in Step 5. Seed it with sample data on first run:
 ```bash
-docker compose [your profiles] run --rm agent python create_demo_scenario.py
+docker compose --profile demo run --rm agent python create_demo_scenario.py
 ```
 
 ---
 
-### Putting it together
+### Step 5 — Run
 
-Combine your two choices into one command:
+Add `--profile ollama` if you chose Ollama in Step 3.
+Add `--profile demo` if you are using the built-in demo cluster from Step 4.
 
-| LLM | MongoDB | Command |
-|---|---|---|
-| Cloud API | Real cluster | `docker compose up` |
-| Cloud API | Demo cluster | `docker compose --profile demo up -d && docker compose --profile demo run --rm agent` |
-| Ollama | Real cluster | `docker compose --profile ollama up -d && docker compose --profile ollama run --rm agent` |
-| Ollama | Demo cluster | `docker compose --profile ollama --profile demo up -d && docker compose --profile ollama --profile demo run --rm agent` |
+```bash
+# Cloud LLM + real cluster (no extra profiles needed)
+docker compose up
 
-After the agent runs:
+# Ollama + real cluster
+docker compose --profile ollama up -d
+docker compose --profile ollama run --rm agent
+
+# Cloud LLM + demo cluster
+docker compose --profile demo up -d
+docker compose --profile demo run --rm agent
+
+# Ollama + demo cluster
+docker compose --profile ollama --profile demo up -d
+docker compose --profile ollama --profile demo run --rm agent
+```
+
+Open the report when done:
 ```bash
 open $(ls -t reports/*.html | head -1)
 ```
