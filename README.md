@@ -177,22 +177,19 @@ Each run produces a separate timestamped report in `reports/`.
 
 ### Step 5 — Run
 
-**Cloud LLM (Option A, C, D, or E):**
+Make the run script executable (once):
 ```bash
-docker compose run --rm agent python src/main_agentic.py "check my cluster health"
+chmod +x run.sh
 ```
 
-**Ollama (Option B):**
+Then run the agent with any message:
 ```bash
-docker compose --profile ollama run --rm agent python src/main_agentic.py "check my cluster health"
+./run.sh "check my cluster health"
+./run.sh "why is my database slow"
+./run.sh "what indexes does the users collection have"
 ```
 
-The agent figures out what to do from your message. When it finishes, it prints the report path to the terminal.
-
-To open the report on a **Linux server (no GUI)**, copy it to your local machine:
-```bash
-scp user@SERVER_IP:/path/to/mongodb-agent-dba/reports/*.html .
-```
+The script reads your `.env` to detect the LLM provider and runs the right Docker command automatically. When the agent finishes, it prints the report path to the terminal.
 
 ## Developing Locally (without Docker)
 
