@@ -33,8 +33,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir \
         -r requirements.txt \
         langchain-anthropic \
-        langchain-openai \
-        langchain-aws
+        langchain-google-vertexai \
+        langchain-aws \
+        langchain-openai
 
 # Copy application source and config
 COPY src/ ./src/

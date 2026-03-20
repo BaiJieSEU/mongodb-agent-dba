@@ -11,6 +11,7 @@ faker>=19.0.0
 mcp[cli]>=1.0.0
 
 # Optional LLM providers — install only what your deployment needs:
-# pip install langchain-anthropic        # Anthropic API
-# pip install langchain-openai           # Azure OpenAI
-# pip install langchain-aws              # AWS Bedrock
+# pip install langchain-anthropic         # Anthropic API
+# pip install langchain-google-vertexai   # GCP Vertex AI
+# pip install langchain-aws               # AWS Bedrock
+# pip install langchain-openai            # Azure OpenAI

@@ -3,9 +3,10 @@
 Supported providers (set llm.provider in agent_config.yaml or AGENT_LLM_PROVIDER env var):
   ollama        Local Ollama — default; no credentials required
   anthropic     Anthropic API — set AGENT_ANTHROPIC_API_KEY
+  vertex_ai     GCP Vertex AI — set GOOGLE_CLOUD_PROJECT + GOOGLE_APPLICATION_CREDENTIALS
+  bedrock       AWS Bedrock   — set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY + AWS_REGION
   azure_openai  Azure OpenAI  — set AGENT_AZURE_OPENAI_KEY + AGENT_AZURE_OPENAI_ENDPOINT +
                                     AGENT_AZURE_OPENAI_DEPLOYMENT
-  bedrock       AWS Bedrock   — set AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY + AWS_REGION
 
 All providers return a Runnable that accepts a plain string prompt and returns a plain
 string response. Caller code never needs to know which provider is active.
@@ -38,14 +39,16 @@ def build_llm(config: "AppConfig") -> "Runnable":
         return _build_ollama(config)
     elif provider == "anthropic":
         return _build_anthropic(config)
-    elif provider == "azure_openai":
-        return _build_azure_openai(config)
+    elif provider == "vertex_ai":
+        return _build_vertexai(config)
     elif provider == "bedrock":
         return _build_bedrock(config)
+    elif provider == "azure_openai":
+        return _build_azure_openai(config)
     else:
         raise ValueError(
             f"Unknown LLM provider: '{provider}'. "
-            f"Valid options: ollama | anthropic | azure_openai | bedrock"
+            f"Valid options: ollama | anthropic | vertex_ai | bedrock | azure_openai"
         )
 
 
@@ -123,6 +126,33 @@ def _build_azure_openai(config: "AppConfig") -> "Runnable":
         api_key=api_key,
     )
     logger.info("Azure OpenAI: endpoint=%s  deployment=%s", endpoint, deployment)
+    return llm | StrOutputParser()
+
+
+def _build_vertexai(config: "AppConfig") -> "Runnable":
+    try:
+        from langchain_google_vertexai import ChatVertexAI
+    except ImportError:
+        raise ImportError(
+            "langchain-google-vertexai is required. Run: pip install langchain-google-vertexai"
+        )
+
+    cfg = config.llm.vertex_ai
+    project  = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("VERTEXAI_PROJECT") or cfg.project
+    location = os.getenv("GOOGLE_CLOUD_LOCATION") or os.getenv("VERTEXAI_LOCATION") or cfg.location
+
+    if not project:
+        raise ValueError(
+            "Vertex AI requires GOOGLE_CLOUD_PROJECT environment variable."
+        )
+
+    llm = ChatVertexAI(
+        model=cfg.model,
+        project=project,
+        location=location,
+        temperature=cfg.temperature,
+    )
+    logger.info("Vertex AI: project=%s  location=%s  model=%s", project, location, cfg.model)
     return llm | StrOutputParser()
 
 

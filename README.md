@@ -111,17 +111,31 @@ AGENT_LLM_PROVIDER=anthropic
 AGENT_ANTHROPIC_API_KEY=<your Anthropic API key>
 ```
 
-**Option B — Azure OpenAI**
+**Option B — Ollama (runs locally, no data sent to the cloud)**
 
-Get your credentials from **Azure Portal → your Azure OpenAI resource → Keys and Endpoint**. Add to `.env`:
+Add to `.env`:
 ```
-AGENT_LLM_PROVIDER=azure_openai
-AGENT_AZURE_OPENAI_KEY=<your API key>
-AGENT_AZURE_OPENAI_ENDPOINT=<your endpoint, e.g. https://contoso.openai.azure.com/>
-AGENT_AZURE_OPENAI_DEPLOYMENT=<your deployment name, e.g. gpt-4o>
+AGENT_LLM_PROVIDER=ollama
 ```
 
-**Option C — AWS Bedrock**
+No API key needed. Start the Ollama container, then pull the model (~5 GB download):
+```bash
+docker compose --profile ollama up -d
+docker exec -it ollama ollama pull qwen3:8b
+```
+
+**Option C — GCP Vertex AI**
+
+Get your project ID from **GCP Console → project selector** (top of page).
+Create a service account key from **IAM → Service Accounts → your account → Keys → Add Key**.
+Add to `.env`:
+```
+AGENT_LLM_PROVIDER=vertex_ai
+GOOGLE_CLOUD_PROJECT=<your GCP project ID>
+GOOGLE_APPLICATION_CREDENTIALS=<path to your service account key JSON file>
+```
+
+**Option D — AWS Bedrock**
 
 Get your credentials from **AWS Console → IAM → your user → Security credentials**.
 The default model is `anthropic.claude-3-sonnet-20240229-v1:0`. Add to `.env`:
@@ -132,16 +146,14 @@ AWS_SECRET_ACCESS_KEY=<your IAM secret access key>
 AWS_DEFAULT_REGION=<region where Bedrock is enabled, e.g. us-east-1>
 ```
 
-**Option D — Ollama (runs locally, no data sent to the cloud)**
+**Option E — Azure OpenAI**
 
-Add to `.env`:
+Get your credentials from **Azure Portal → your Azure OpenAI resource → Keys and Endpoint**. Add to `.env`:
 ```
-AGENT_LLM_PROVIDER=ollama
-```
-
-No API key needed. After Step 5 starts the Ollama container, run this once to download the model (~5 GB):
-```bash
-docker exec -it ollama ollama pull qwen3:8b
+AGENT_LLM_PROVIDER=azure_openai
+AGENT_AZURE_OPENAI_KEY=<your API key>
+AGENT_AZURE_OPENAI_ENDPOINT=<your endpoint, e.g. https://contoso.openai.azure.com/>
+AGENT_AZURE_OPENAI_DEPLOYMENT=<your deployment name, e.g. gpt-4o>
 ```
 
 ---
@@ -160,15 +172,13 @@ AGENT_MONGO_CLUSTER=mongodb+srv://user:pass@your-cluster.mongodb.net/
 
 ### Step 5 — Run
 
-**Option A, B, or C (cloud LLM):**
+**Option A, C, D, or E (cloud LLM):**
 ```bash
 docker compose up
 ```
 
-**Option D (Ollama):**
+**Option B (Ollama) — if not already started in Step 3:**
 ```bash
-docker compose --profile ollama up -d
-# Now run the model pull from Step 3, then:
 docker compose --profile ollama run --rm agent
 ```
 

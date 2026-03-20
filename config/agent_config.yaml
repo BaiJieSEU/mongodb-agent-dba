@@ -3,7 +3,7 @@ mongodb:
   monitored_cluster: "mongodb://localhost:27018"
 
 llm:
-  # Active provider: ollama | anthropic | azure_openai | bedrock
+  # Active provider: ollama | anthropic | vertex_ai | bedrock | azure_openai
   # Override at runtime: AGENT_LLM_PROVIDER=anthropic
   provider: "ollama"
 
@@ -17,17 +17,24 @@ llm:
     model: "claude-sonnet-4-6"
     temperature: 0.1
 
-  azure_openai:
-    # Credentials: AGENT_AZURE_OPENAI_KEY (or AZURE_OPENAI_API_KEY)
-    endpoint: ""          # e.g. https://my-resource.openai.azure.com/
-    deployment: ""        # e.g. gpt-4o
-    api_version: "2024-02-15-preview"
+  vertex_ai:
+    # Credentials: GOOGLE_APPLICATION_CREDENTIALS + GOOGLE_CLOUD_PROJECT
+    project: ""              # GCP project ID
+    location: "us-central1"
+    model: "gemini-2.0-flash-001"
     temperature: 0.1
 
   bedrock:
     # Credentials: standard AWS env vars (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
     model_id: "anthropic.claude-3-sonnet-20240229-v1:0"
     region: "us-east-1"
+    temperature: 0.1
+
+  azure_openai:
+    # Credentials: AGENT_AZURE_OPENAI_KEY (or AZURE_OPENAI_API_KEY)
+    endpoint: ""          # e.g. https://my-resource.openai.azure.com/
+    deployment: ""        # e.g. gpt-4o
+    api_version: "2024-02-15-preview"
     temperature: 0.1
 
 agent:

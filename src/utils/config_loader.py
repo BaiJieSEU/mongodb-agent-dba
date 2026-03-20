@@ -36,12 +36,20 @@ class BedrockProviderConfig(BaseModel):
     temperature: float = 0.1
 
 
+class VertexAIProviderConfig(BaseModel):
+    project: str = ""
+    location: str = "us-central1"
+    model: str = "gemini-2.0-flash-001"
+    temperature: float = 0.1
+
+
 class LLMConfig(BaseModel):
     provider: str = "ollama"
     ollama: OllamaProviderConfig = OllamaProviderConfig()
     anthropic: AnthropicProviderConfig = AnthropicProviderConfig()
     azure_openai: AzureOpenAIProviderConfig = AzureOpenAIProviderConfig()
     bedrock: BedrockProviderConfig = BedrockProviderConfig()
+    vertex_ai: VertexAIProviderConfig = VertexAIProviderConfig()
 
 
 class AgentConfig(BaseModel):
@@ -84,6 +92,12 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
         data["llm"]["ollama"]["base_url"] = v
     if v := os.getenv("AGENT_OLLAMA_MODEL"):
         data["llm"]["ollama"]["model"] = v
+
+    # Vertex AI overrides
+    if v := os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("VERTEXAI_PROJECT"):
+        data["llm"]["vertex_ai"]["project"] = v
+    if v := os.getenv("GOOGLE_CLOUD_LOCATION") or os.getenv("VERTEXAI_LOCATION"):
+        data["llm"]["vertex_ai"]["location"] = v
 
     # Slow query threshold
     if v := os.getenv("AGENT_SLOW_QUERY_MS"):
