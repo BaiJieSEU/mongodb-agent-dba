@@ -204,7 +204,6 @@ mongodb-agent-dba/
 ├── BACKLOG.md                            # Prioritised roadmap (35 items, 8 epics)
 ├── requirements.txt                      # Python dependencies (pip)
 ├── README.md                             # User-facing documentation
-├── create_demo_scenario.py               # Generates testdb (5 colls) + testUATdb (2 colls) with slow queries
 └── CLAUDE.md                             # Development reference (this file)
 ```
 
@@ -230,7 +229,7 @@ print('testUATdb slow queries (>=5ms):', db2['system.profile'].count_documents({
 "
 ```
 
-If `system.profile` is empty, run `python create_demo_scenario.py`.
+If `system.profile` is empty, ensure the profiler is enabled on the monitored cluster (`slowms ≤ 5`, level 1).
 
 ### Test Cases
 
@@ -276,9 +275,6 @@ export PATH="$HOME/mongodb/bin:$PATH"
 mongod --config ~/mongodb/config/mongod.conf           # port 27017
 mongod --config ~/mongodb/config/mongod2.conf --fork   # port 27018
 
-# Generate test data + slow profiler entries
-source venv/bin/activate && python create_demo_scenario.py
-
 # Run health check (produces JSON + HTML report)
 source venv/bin/activate && python src/main_agentic.py --health-check
 
@@ -297,7 +293,7 @@ source venv/bin/activate && python src/main_agentic.py "my database is slow"
 |---|---|
 | Agent won't start | Check `lsof -i :27017`, `lsof -i :27018`, `curl localhost:11434/api/tags` |
 | MCP session timeout | Confirm Node 18+ installed; run `mongodb-mcp-server --version` |
-| No slow queries found | Run `python create_demo_scenario.py`; profiler must be level 1, `slowms ≤ 5` |
+| No slow queries found | Profiler must be enabled on monitored cluster: level 1, `slowms ≤ 5` |
 | Memory not persisting | Check `agent_memory` database on port 27017; verify TTL indexes exist |
 | `first_detected` conflict | Ensure `agent_memory.py` pops `first_detected` from `$set` before upsert |
 | LLM returns invalid JSON | Retry; if persistent, switch model in `config/agent_config.yaml` — `qwen3:8b` is the active model |

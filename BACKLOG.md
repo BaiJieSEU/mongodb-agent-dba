@@ -701,11 +701,9 @@ configured mongod instances, Ollama, and the correct model pulled. That is too m
 steps for a 30-minute PS engagement. Docker Compose collapses this to one command.
 
 **Acceptance criteria:**
-- `docker-compose.yml` defines four services:
+- `docker-compose.yml` defines three services:
   - `agent` — Python app image; all LLM providers supported via env vars
   - `mongo-memory` — MongoDB 8.0, port 27017, agent memory store
-  - `mongo-monitored` — MongoDB 8.0, port 27018, for local dev/demo only
-    (production: replaced by customer's `AGENT_MONGO_CLUSTER` env var)
   - `ollama` — profile `ollama` only; skipped when using cloud LLM providers
 - `Dockerfile`: Python 3.11-slim + Node 18 + `@mongodb-js/mongodb-mcp-server` + pip deps
 - `.env.example` committed; `.env` in `.gitignore`

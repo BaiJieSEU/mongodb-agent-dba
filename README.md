@@ -104,58 +104,30 @@ docker exec -it ollama ollama pull qwen3:8b
 
 ---
 
-### Step 4 — Choose which MongoDB cluster to analyse
+### Step 4 — Connect to your MongoDB cluster
 
-**Option 1 — Your own cluster (real data)**
-
-This is a MongoDB cluster you already have running — for example a MongoDB Atlas cluster,
-or a self-hosted MongoDB server. The agent will connect to it, run the health check, and
-produce a report based on your real data.
+The agent connects to a MongoDB cluster you already have running — for example a
+MongoDB Atlas cluster or a self-hosted MongoDB server.
 
 Add the connection string to `.env`:
 ```
 AGENT_MONGO_CLUSTER=mongodb+srv://user:pass@your-cluster.mongodb.net/
 ```
 
-**Option 2 — Built-in demo cluster (for trying out the agent)**
-
-If you don't have a MongoDB cluster, Docker Compose can start a local one for you.
-It contains no data by default — you run a setup script once to populate it with
-sample collections and slow queries so the agent has something to analyse.
-
-Leave `AGENT_MONGO_CLUSTER` unset in `.env`. Add `--profile demo` to the run command in Step 5.
-
 ---
 
 ### Step 5 — Run
 
-Choose the command that matches your setup from Steps 3 and 4:
-
-**Option A or B or C (cloud LLM) + your own cluster:**
+**Option A, B, or C (cloud LLM):**
 ```bash
 docker compose up
 ```
 
-**Option A or B or C (cloud LLM) + demo cluster:**
-```bash
-docker compose --profile demo up -d
-docker compose --profile demo run --rm agent python create_demo_scenario.py  # first run only — seeds demo data
-docker compose --profile demo run --rm agent
-```
-
-**Option D (Ollama) + your own cluster:**
+**Option D (Ollama):**
 ```bash
 docker compose --profile ollama up -d
 # Now run the model pull from Step 3, then:
 docker compose --profile ollama run --rm agent
-```
-
-**Option D (Ollama) + demo cluster:**
-```bash
-docker compose --profile ollama --profile demo up -d
-# Now run the model pull from Step 3, then:
-docker compose --profile ollama --profile demo run --rm agent python create_demo_scenario.py  # first run only — seeds demo data
-docker compose --profile ollama --profile demo run --rm agent
 ```
 
 When the agent finishes, open the report:
