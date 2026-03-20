@@ -24,39 +24,54 @@ investigations.
 
 ## Quick Start
 
-### Step 1 — What you need
+### Step 1 — Install Docker
 
-To run this agent you need two things:
+The agent runs inside Docker, so Docker must be installed first.
 
-1. **The app** — a Docker image containing the agent, Node.js, and the MongoDB MCP Server
-2. **An LLM** — the agent uses a language model to reason about the data and generate recommendations
-
-Docker must be installed on your machine. Everything else is handled by Docker Compose.
+Download and install **Docker Desktop** from [docker.com](https://www.docker.com/products/docker-desktop/).
+After installation, verify it is running:
+```bash
+docker --version
+```
 
 ---
 
-### Step 2 — Install the app
+### Step 2 — Download the app
 
+The following command downloads the code into a new folder called `mongodb-agent-dba`:
 ```bash
 git clone https://github.com/BaiJieSEU/mongodb-agent-dba
 cd mongodb-agent-dba
-cp .env.example .env   # .env is gitignored — your secrets stay local
+```
+
+Create your configuration file (this is where you will put your secrets):
+```bash
+cp .env.example .env
+```
+
+Build the Docker image:
+```bash
 docker compose build
 ```
 
 ---
 
-### Step 3 — Set up your LLM
+### Step 3 — Choose and configure an LLM
 
-Pick one option and add the corresponding lines to `.env`:
+The agent needs a language model to analyse data and generate recommendations.
+Open `.env` in a text editor and add the lines for your chosen provider.
 
-**Anthropic API**
+**Option A — Anthropic API**
+
+Sign up at anthropic.com to get an API key, then add to `.env`:
 ```
 AGENT_LLM_PROVIDER=anthropic
 AGENT_ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-**Azure OpenAI**
+**Option B — Azure OpenAI**
+
+Add to `.env`:
 ```
 AGENT_LLM_PROVIDER=azure_openai
 AGENT_AZURE_OPENAI_KEY=...
@@ -64,7 +79,9 @@ AGENT_AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com/
 AGENT_AZURE_OPENAI_DEPLOYMENT=gpt-4o
 ```
 
-**AWS Bedrock**
+**Option C — AWS Bedrock**
+
+The default model is `anthropic.claude-3-sonnet-20240229-v1:0`. Add to `.env`:
 ```
 AGENT_LLM_PROVIDER=bedrock
 AWS_ACCESS_KEY_ID=...
@@ -72,54 +89,62 @@ AWS_SECRET_ACCESS_KEY=...
 AWS_DEFAULT_REGION=us-east-1
 ```
 
-**Ollama (local — no data sent to the cloud, ~5 GB model download)**
+**Option D — Ollama (runs locally, no data sent to the cloud)**
+
+Add to `.env`:
 ```
 AGENT_LLM_PROVIDER=ollama
 ```
-Ollama runs as a Docker container alongside the agent. Start it with the `--profile ollama` flag (see Step 5). Pull the model on first run:
-```bash
-docker exec -it ollama ollama pull qwen3:8b
-```
+
+No API key needed. Ollama will run as a Docker container on your machine.
+The model (~5 GB) is downloaded automatically the first time you run (see Step 5).
 
 ---
 
-### Step 4 — Connect to MongoDB
+### Step 4 — Connect to your MongoDB cluster
 
-Add your cluster URI to `.env`:
+Add your MongoDB connection string to `.env`:
 ```
 AGENT_MONGO_CLUSTER=mongodb+srv://user:pass@your-cluster.mongodb.net/
 ```
 
-No real cluster? Use the built-in demo cluster instead — just leave `AGENT_MONGO_CLUSTER` unset and add `--profile demo` to the run command in Step 5. Seed it with sample data on first run:
-```bash
-docker compose --profile demo run --rm agent python create_demo_scenario.py
-```
+**Don't have a cluster yet?** Leave `AGENT_MONGO_CLUSTER` unset. The agent will start
+a local demo MongoDB cluster automatically for you (see Step 5).
 
 ---
 
 ### Step 5 — Run
 
-Add `--profile ollama` if you chose Ollama in Step 3.
-Add `--profile demo` if you are using the built-in demo cluster from Step 4.
+Choose the command that matches your setup from Steps 3 and 4:
 
+**Option A or B or C (cloud LLM) + your own cluster:**
 ```bash
-# Cloud LLM + real cluster (no extra profiles needed)
 docker compose up
+```
 
-# Ollama + real cluster
-docker compose --profile ollama up -d
-docker compose --profile ollama run --rm agent
-
-# Cloud LLM + demo cluster
+**Option A or B or C (cloud LLM) + demo cluster:**
+```bash
 docker compose --profile demo up -d
+docker compose --profile demo run --rm agent python create_demo_scenario.py  # first run only — seeds demo data
 docker compose --profile demo run --rm agent
+```
 
-# Ollama + demo cluster
+**Option D (Ollama) + your own cluster:**
+```bash
+docker compose --profile ollama up -d
+docker exec -it ollama ollama pull qwen3:8b  # first run only — downloads ~5 GB model
+docker compose --profile ollama run --rm agent
+```
+
+**Option D (Ollama) + demo cluster:**
+```bash
 docker compose --profile ollama --profile demo up -d
+docker exec -it ollama ollama pull qwen3:8b  # first run only — downloads ~5 GB model
+docker compose --profile ollama --profile demo run --rm agent python create_demo_scenario.py  # first run only — seeds demo data
 docker compose --profile ollama --profile demo run --rm agent
 ```
 
-Open the report when done:
+When the agent finishes, open the report:
 ```bash
 open $(ls -t reports/*.html | head -1)
 ```
