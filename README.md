@@ -71,22 +71,24 @@ AGENT_ANTHROPIC_API_KEY=sk-ant-...
 
 **Option B — Azure OpenAI**
 
-Add to `.env`:
+Go to **Azure Portal → your Azure OpenAI resource → Keys and Endpoint**.
+Copy the Key and Endpoint from there, then add to `.env`:
 ```
 AGENT_LLM_PROVIDER=azure_openai
-AGENT_AZURE_OPENAI_KEY=...
-AGENT_AZURE_OPENAI_ENDPOINT=https://my-resource.openai.azure.com/
-AGENT_AZURE_OPENAI_DEPLOYMENT=gpt-4o
+AGENT_AZURE_OPENAI_KEY=<Key from Azure Portal>
+AGENT_AZURE_OPENAI_ENDPOINT=<Endpoint from Azure Portal, e.g. https://contoso.openai.azure.com/>
+AGENT_AZURE_OPENAI_DEPLOYMENT=<your deployment name, e.g. gpt-4o>
 ```
 
 **Option C — AWS Bedrock**
 
-The default model is `anthropic.claude-3-sonnet-20240229-v1:0`. Add to `.env`:
+Go to **AWS Console → IAM → your user → Security credentials** to get your access key.
+The default model used is `anthropic.claude-3-sonnet-20240229-v1:0`. Add to `.env`:
 ```
 AGENT_LLM_PROVIDER=bedrock
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
-AWS_DEFAULT_REGION=us-east-1
+AWS_ACCESS_KEY_ID=<your IAM access key ID>
+AWS_SECRET_ACCESS_KEY=<your IAM secret access key>
+AWS_DEFAULT_REGION=<region where Bedrock is enabled, e.g. us-east-1>
 ```
 
 **Option D — Ollama (runs locally, no data sent to the cloud)**
