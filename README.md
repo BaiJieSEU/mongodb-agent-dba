@@ -24,7 +24,40 @@ investigations.
 
 ## Quick Start — Docker (recommended)
 
-The fastest path to a running deployment. Requires only Docker and Docker Compose.
+Requires only Docker and Docker Compose. Pick **one** of the three paths below.
+
+---
+
+### Path A — Anthropic API against a real cluster
+
+Use this when you have an Anthropic API key and want to run against a real MongoDB cluster.
+
+```bash
+git clone https://github.com/BaiJieSEU/mongodb-agent-dba
+cd mongodb-agent-dba
+
+# .env holds your secrets — it is gitignored and never committed
+cp .env.example .env
+```
+
+Open `.env` and set these two lines:
+```
+AGENT_ANTHROPIC_API_KEY=sk-ant-...
+AGENT_MONGO_CLUSTER=mongodb+srv://user:pass@your-cluster.mongodb.net/
+```
+
+Then run:
+```bash
+docker compose up
+open $(ls -t reports/*.html | head -1)
+```
+
+---
+
+### Path B — Local Ollama (no data leaves the machine)
+
+Use this when you need data sovereignty or have no cloud API key.
+Downloads a ~5 GB model on first run.
 
 ```bash
 git clone https://github.com/BaiJieSEU/mongodb-agent-dba
@@ -32,34 +65,46 @@ cd mongodb-agent-dba
 cp .env.example .env
 ```
 
-Edit `.env` and choose your LLM provider, then:
-
-**Cloud LLM (Anthropic / Azure / Bedrock):**
-```bash
-# Set AGENT_ANTHROPIC_API_KEY (or Azure/Bedrock equivalent) in .env
-# Set AGENT_MONGO_CLUSTER to your target cluster URI in .env
-docker compose up
-# Reports appear in ./reports/ when the agent exits
-open $(ls -t reports/*.html | head -1)
+Open `.env` and set:
+```
+AGENT_LLM_PROVIDER=ollama
+AGENT_MONGO_CLUSTER=mongodb+srv://user:pass@your-cluster.mongodb.net/
 ```
 
-**Local Ollama (data sovereignty — no data leaves the machine):**
+Then run:
 ```bash
-# Set AGENT_LLM_PROVIDER=ollama in .env
 docker compose --profile ollama up -d
-docker exec -it ollama ollama pull qwen3:8b   # first run only (~5 GB)
+docker exec -it ollama ollama pull qwen3:8b   # first run only — ~5 GB download
 docker compose --profile ollama run --rm agent
 open $(ls -t reports/*.html | head -1)
 ```
 
-**Full local demo (no external cluster, no API key):**
+---
+
+### Path C — Full local demo (no cluster, no API key)
+
+Use this to try the agent locally with a built-in demo MongoDB cluster.
+Everything runs on your machine; no external services required.
+
 ```bash
-# Set AGENT_LLM_PROVIDER=ollama in .env
+git clone https://github.com/BaiJieSEU/mongodb-agent-dba
+cd mongodb-agent-dba
+cp .env.example .env
+```
+
+Open `.env` and set:
+```
+AGENT_LLM_PROVIDER=ollama
+```
+(`AGENT_MONGO_CLUSTER` can be left unset — the demo cluster starts automatically.)
+
+Then run:
+```bash
 docker compose --profile ollama --profile demo up -d
-docker exec -it ollama ollama pull qwen3:8b   # first run only
-# Optionally generate demo slow-query data:
-docker compose --profile ollama --profile demo run --rm agent \
-  python create_demo_scenario.py
+docker exec -it ollama ollama pull qwen3:8b         # first run only — ~5 GB download
+# Seed the demo cluster with slow queries (first run only):
+docker compose --profile ollama --profile demo run --rm agent python create_demo_scenario.py
+# Run the health check:
 docker compose --profile ollama --profile demo run --rm agent
 open $(ls -t reports/*.html | head -1)
 ```
