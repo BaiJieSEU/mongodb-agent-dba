@@ -112,7 +112,13 @@ def print_health_report(report: HealthCheckReport) -> None:
         console.print()
 
     # ── Footer ────────────────────────────────────────────────────────────────
-    console.print(f"  [dim]Report saved → {report.report_path}[/dim]")
+    html_path = report.report_path.replace(".json", ".html")
+    console.print(Panel(
+        f"[bold green]Report saved[/bold green]\n\n"
+        f"  HTML  →  {html_path}\n"
+        f"  JSON  →  {report.report_path}",
+        expand=False,
+    ))
     console.print()
 
 

@@ -177,46 +177,20 @@ Each run produces a separate timestamped report in `reports/`.
 
 ### Step 5 — Run
 
-The agent has two modes. Choose one:
-
-**Health check** — runs a full 8-section analysis and writes a report to `reports/`:
-
+**Cloud LLM (Option A, C, D, or E):**
 ```bash
-# Cloud LLM (Option A, C, D, or E):
-docker compose run --rm agent python src/main_agentic.py --health-check
-
-# Ollama (Option B):
-docker compose --profile ollama run --rm agent python src/main_agentic.py --health-check
+docker compose run --rm agent python src/main_agentic.py "check my cluster health"
 ```
 
-**Ask a question** — natural language investigation against your cluster:
-
+**Ollama (Option B):**
 ```bash
-# Cloud LLM (Option A, C, D, or E):
-docker compose run --rm agent python src/main_agentic.py "my database is slow"
-
-# Ollama (Option B):
-docker compose --profile ollama run --rm agent python src/main_agentic.py "my database is slow"
+docker compose --profile ollama run --rm agent python src/main_agentic.py "check my cluster health"
 ```
 
-When the agent finishes, find the report:
-```bash
-ls -t reports/*.html | head -1
-```
+The agent figures out what to do from your message. When it finishes, it prints the report path to the terminal.
 
-**macOS** — open in browser:
+To open the report on a **Linux server (no GUI)**, copy it to your local machine:
 ```bash
-open $(ls -t reports/*.html | head -1)
-```
-
-**Linux desktop** — open in browser:
-```bash
-xdg-open $(ls -t reports/*.html | head -1)
-```
-
-**Linux server (no GUI)** — copy the report to your local machine, then open it:
-```bash
-# Run this on your local machine, replacing SERVER_IP and /path/to/mongodb-agent-dba
 scp user@SERVER_IP:/path/to/mongodb-agent-dba/reports/*.html .
 ```
 
