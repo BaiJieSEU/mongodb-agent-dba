@@ -160,13 +160,18 @@ AGENT_AZURE_OPENAI_DEPLOYMENT=<your deployment name, e.g. gpt-4o>
 
 ### Step 4 — Connect to your MongoDB cluster
 
-The agent connects to a MongoDB cluster you already have running — for example a
-MongoDB Atlas cluster or a self-hosted MongoDB server.
-
-Add the connection string to `.env`:
+The agent analyses **one cluster per run**. Set its connection string in `.env`:
 ```
 AGENT_MONGO_CLUSTER=mongodb+srv://user:pass@your-cluster.mongodb.net/
 ```
+
+**Multiple clusters?** Run the agent once per cluster, overriding the connection string each time:
+```bash
+AGENT_MONGO_CLUSTER=mongodb+srv://cluster1.mongodb.net/ docker compose run --rm agent
+AGENT_MONGO_CLUSTER=mongodb+srv://cluster2.mongodb.net/ docker compose run --rm agent
+AGENT_MONGO_CLUSTER=mongodb+srv://cluster3.mongodb.net/ docker compose run --rm agent
+```
+Each run produces a separate timestamped report in `reports/`.
 
 ---
 
