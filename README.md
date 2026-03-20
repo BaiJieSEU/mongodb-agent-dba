@@ -63,27 +63,26 @@ Open `.env` in a text editor and add the lines for your chosen provider.
 
 **Option A — Anthropic API**
 
-Sign up at anthropic.com to get an API key, then add to `.env`:
+Get your API key from console.anthropic.com → **API Keys**. Add to `.env`:
 ```
 AGENT_LLM_PROVIDER=anthropic
-AGENT_ANTHROPIC_API_KEY=sk-ant-...
+AGENT_ANTHROPIC_API_KEY=<your Anthropic API key>
 ```
 
 **Option B — Azure OpenAI**
 
-Go to **Azure Portal → your Azure OpenAI resource → Keys and Endpoint**.
-Copy the Key and Endpoint from there, then add to `.env`:
+Get your credentials from **Azure Portal → your Azure OpenAI resource → Keys and Endpoint**. Add to `.env`:
 ```
 AGENT_LLM_PROVIDER=azure_openai
-AGENT_AZURE_OPENAI_KEY=<Key from Azure Portal>
-AGENT_AZURE_OPENAI_ENDPOINT=<Endpoint from Azure Portal, e.g. https://contoso.openai.azure.com/>
+AGENT_AZURE_OPENAI_KEY=<your API key>
+AGENT_AZURE_OPENAI_ENDPOINT=<your endpoint, e.g. https://contoso.openai.azure.com/>
 AGENT_AZURE_OPENAI_DEPLOYMENT=<your deployment name, e.g. gpt-4o>
 ```
 
 **Option C — AWS Bedrock**
 
-Go to **AWS Console → IAM → your user → Security credentials** to get your access key.
-The default model used is `anthropic.claude-3-sonnet-20240229-v1:0`. Add to `.env`:
+Get your credentials from **AWS Console → IAM → your user → Security credentials**.
+The default model is `anthropic.claude-3-sonnet-20240229-v1:0`. Add to `.env`:
 ```
 AGENT_LLM_PROVIDER=bedrock
 AWS_ACCESS_KEY_ID=<your IAM access key ID>
