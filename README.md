@@ -109,27 +109,25 @@ docker compose --profile ollama --profile demo run --rm agent
 open $(ls -t reports/*.html | head -1)
 ```
 
-## Quick Start — Local (manual install)
+## Developing Locally (without Docker)
+
+For contributors working on the agent source code. Requires Python 3.10+, Node 18+,
+two running MongoDB 8.0 instances (ports 27017 and 27018), and Ollama.
 
 ```bash
-# Prerequisites: Python 3.10+, Node 18+, MongoDB 8.0+, Ollama
-git clone https://github.com/BaiJieSEU/mongodb-agent-dba
-cd mongodb-agent-dba
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 npm install -g @mongodb-js/mongodb-mcp-server
 
-# Start MongoDB instances (agent memory store + monitored cluster)
-mongod --config ~/mongodb/config/mongod.conf   # port 27017
-mongod --config ~/mongodb/config/mongod2.conf  # port 27018
+# Run health check
+python src/main_agentic.py --health-check
 
-# Start Ollama and pull model
-brew services start ollama
-ollama pull qwen3:8b
-
-# Generate demo data
-python create_demo_scenario.py
+# Run agentic investigation
+python src/main_agentic.py "my database is slow"
 ```
+
+LLM and MongoDB URIs are read from `config/agent_config.yaml` and overridden by
+`AGENT_*` env vars (see `.env.example`).
 
 ## Usage
 
