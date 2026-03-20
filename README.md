@@ -104,15 +104,26 @@ docker exec -it ollama ollama pull qwen3:8b
 
 ---
 
-### Step 4 — Connect to your MongoDB cluster
+### Step 4 — Choose which MongoDB cluster to analyse
 
-Add your MongoDB connection string to `.env`:
+**Option 1 — Your own cluster (real data)**
+
+This is a MongoDB cluster you already have running — for example a MongoDB Atlas cluster,
+or a self-hosted MongoDB server. The agent will connect to it, run the health check, and
+produce a report based on your real data.
+
+Add the connection string to `.env`:
 ```
 AGENT_MONGO_CLUSTER=mongodb+srv://user:pass@your-cluster.mongodb.net/
 ```
 
-**Don't have a cluster yet?** Leave `AGENT_MONGO_CLUSTER` unset. The agent will start
-a local demo MongoDB cluster automatically for you (see Step 5).
+**Option 2 — Built-in demo cluster (for trying out the agent)**
+
+If you don't have a MongoDB cluster, Docker Compose can start a local one for you.
+It contains no data by default — you run a setup script once to populate it with
+sample collections and slow queries so the agent has something to analyse.
+
+Leave `AGENT_MONGO_CLUSTER` unset in `.env`. Add `--profile demo` to the run command in Step 5.
 
 ---
 
