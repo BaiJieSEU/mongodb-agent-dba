@@ -43,6 +43,7 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-060 | HTML report output | P1 | M | 7 | ✅ Done |
 | BL-073 | Secret management integration | P1 | M | 8 | 🔲 |
 | BL-050 | Multi-cluster support | P1 | L | 6 | 🔶 Partial |
+| BL-076 | Multi-cluster unified report | P1 | L | 6 | 🔲 |
 | BL-033 | ESR index order validation | P2 | S | 4 | 🔲 |
 | BL-041 | Approval-gated profiler config | P2 | S | 5 | 🔲 |
 | BL-052 | Immutable audit trail | P2 | S | 6 | 🔲 |
@@ -57,9 +58,9 @@ When adding or updating an item, re-insert it in the correct position — do not
 **Done:** 15 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014, BL-009, BL-034, BL-070)
 **Partial:** 2 items (BL-050 — within-cluster multi-DB done; BL-071 — LLM+MongoDB env vars done, full coverage pending)
 **P0:** 3 remaining — scheduler (BL-011), baseline severity (BL-021), typed output (BL-030)
-**P1:** 16 items — high-value once P0 is in place (includes BL-034 LLM recommendations)
+**P1:** 17 items — high-value once P0 is in place
 **P2–P3:** 9 items — important but not blocking
-**Total:** 40 items across 8 epics (13 done, 2 partial, 25 remaining)
+**Total:** 41 items across 8 epics (15 done, 2 partial, 24 remaining)
 
 ---
 
@@ -539,6 +540,55 @@ check against any registered cluster by name so I don't need to edit config file
 - CLI accepts `--cluster <name>` flag
 - Memory store scoped per cluster URI (investigations tagged with cluster name)
 - Health check report header includes cluster name
+
+---
+
+### BL-076 · Multi-cluster unified report
+**Priority:** P1 | **Size:** L
+
+**Story:** As a DBA managing multiple clusters, I want a single report that covers
+all clusters so I can review health across my entire fleet without opening a separate
+file per cluster.
+
+**Depends on:** BL-050 (multi-cluster run support via `AGENT_MONGO_CLUSTERS`)
+
+**Acceptance criteria:**
+
+**JSON** — top-level envelope wraps N cluster reports:
+```json
+{
+  "run_id": "...",
+  "timestamp": "...",
+  "cluster_count": 3,
+  "overall_severity": "critical",
+  "clusters": [
+    { "cluster_uri": "...", "overall_severity": "...", "sections": [...], "recommendations": [...] },
+    { "cluster_uri": "...", ... },
+    { "cluster_uri": "...", ... }
+  ]
+}
+```
+Each element of `clusters` is a full existing `HealthCheckReport` object — no changes
+to the single-cluster schema.
+
+**Markdown** — single file structured as:
+- Summary table at top: cluster | overall severity | critical sections | warning sections
+- Full per-cluster content below, each preceded by `# Cluster: <hostname>` and separated by `---`
+- Readable as one document; skimmable via headings
+
+**HTML** — single self-contained page:
+- Cluster switcher tabs at the top of the page (one tab per cluster, coloured by severity)
+- Sidebar nav shows sections for the currently active cluster
+- Clicking a tab switches the main content area to that cluster's sections and recommendations
+- Overall severity banner updates to reflect the selected cluster
+- No page reload — pure CSS/JS tab switching
+
+**Implementation notes:**
+- `MultiClusterReport` model wraps `List[HealthCheckReport]` with its own `overall_severity`
+  (worst across all clusters) and `run_id`
+- `run.sh` collects per-cluster reports and passes them to a new `MultiClusterReporter`
+  which produces the unified JSON, MD, and HTML
+- Single-cluster path unchanged — `MultiClusterReport` only used when N > 1
 
 ---
 
