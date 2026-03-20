@@ -342,12 +342,12 @@ mongodb-agent-dba/
 ├── config/
 │   └── agent_config.yaml                # Runtime configuration
 ├── Dockerfile                           # Python 3.11 + Node 20 + MCP server
-├── docker-compose.yml                   # Four-service stack with profiles
+├── docker-compose.yml                   # Three-service stack (agent, mongo-memory, ollama)
 ├── .env.example                         # All configurable env vars (copy to .env)
 ├── reports/                             # JSON + HTML health check output
+├── run.sh                               # Run wrapper (detects LLM provider, loops clusters)
 ├── REQUIREMENTS.md                      # Product scope + capability assessment
-├── BACKLOG.md                           # Prioritised roadmap
-└── create_demo_scenario.py              # Generates testdb with slow queries
+└── BACKLOG.md                           # Prioritised roadmap
 ```
 
 ## Memory System

@@ -238,7 +238,7 @@ If `system.profile` is empty, ensure the profiler is enabled on the monitored cl
    source venv/bin/activate && python src/main_agentic.py --health-check
    open $(ls -t reports/*.html | head -1)
    ```
-   Expected: 7 sections, `reports/health_*.json` and `reports/health_*.html` written
+   Expected: 8 sections, `reports/health_*.json` and `reports/health_*.html` written
 
 2. **Performance investigation** — should call `fetch_slow_queries` + `check_indexes` + `explain_query`:
    ```bash
@@ -305,7 +305,7 @@ source venv/bin/activate && python src/main_agentic.py "my database is slow"
 
 | Layer | Technology |
 |---|---|
-| LLM reasoning | `src/utils/llm_factory.py` — Ollama (default), Anthropic, Azure OpenAI, Bedrock; provider set via `llm.provider` or `AGENT_LLM_PROVIDER` env var |
+| LLM reasoning | `src/utils/llm_factory.py` — Ollama (default), Anthropic, GCP Vertex AI, AWS Bedrock, Azure OpenAI; provider set via `llm.provider` or `AGENT_LLM_PROVIDER` env var |
 | DB tool execution | `@mongodb-js/mongodb-mcp-server` (Node 18+), read-only |
 | MCP client | Python `mcp` SDK (`mcp[cli]>=1.0.0`) |
 | Agent memory store | PyMongo + MongoDB 8.0 (port 27017) |
