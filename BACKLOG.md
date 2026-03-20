@@ -42,6 +42,7 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-031 | Automatic tool parameter chaining | P1 | M | 4 | 🔲 |
 | BL-060 | HTML report output | P1 | M | 7 | ✅ Done |
 | BL-073 | Secret management integration | P1 | M | 8 | 🔲 |
+| BL-077 | Credential security best practices | P1 | M | 8 | 🔲 |
 | BL-050 | Multi-cluster support | P1 | L | 6 | 🔶 Partial |
 | BL-076 | Multi-cluster unified report | P1 | L | 6 | 🔲 |
 | BL-033 | ESR index order validation | P2 | S | 4 | 🔲 |
@@ -58,9 +59,9 @@ When adding or updating an item, re-insert it in the correct position — do not
 **Done:** 15 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014, BL-009, BL-034, BL-070)
 **Partial:** 2 items (BL-050 — within-cluster multi-DB done; BL-071 — LLM+MongoDB env vars done, full coverage pending)
 **P0:** 3 remaining — scheduler (BL-011), baseline severity (BL-021), typed output (BL-030)
-**P1:** 17 items — high-value once P0 is in place
+**P1:** 18 items — high-value once P0 is in place
 **P2–P3:** 9 items — important but not blocking
-**Total:** 41 items across 8 epics (15 done, 2 partial, 24 remaining)
+**Total:** 42 items across 8 epics (15 done, 2 partial, 25 remaining)
 
 ---
 
@@ -735,6 +736,41 @@ credentials are stored in `.env` files on disk.
   workload identity preferred over static keys)
 - Secret fetch happens once at startup; secrets not logged or written to disk
 - `AGENT_SECRET_PROVIDER` env var overrides config file setting
+
+---
+
+### BL-077 · Credential security best practices
+**Priority:** P1 | **Size:** M
+
+**Story:** As a PS engineer or customer, I want the agent to enforce security best
+practices for all credentials it holds — MongoDB connection strings and LLM API keys
+— so the deployment meets enterprise security requirements.
+
+**MongoDB connection security:**
+- Enforce TLS on all connections: reject `mongodb://` URIs without `tls=true` unless
+  explicitly opted out via `AGENT_MONGO_ALLOW_PLAINTEXT=true`
+- Validate that the connecting user has only the minimum required roles:
+  `read` on monitored databases + `clusterMonitor` on admin — warn if broader roles
+  (e.g. `root`, `dbOwner`) are detected via `connectionStatus`
+- Log the resolved username and auth mechanism (SCRAM-SHA-256, X.509, IAM) at startup
+- Support X.509 certificate auth: `AGENT_MONGO_TLS_CERT` and `AGENT_MONGO_TLS_KEY`
+  env vars
+
+**LLM API key security:**
+- API keys must never appear in log output — mask all credential values in log lines
+- Validate key format at startup and give a clear error before the run begins
+  (avoids wasting a full health-check run on a bad key)
+- Support short-lived credentials where available:
+  - AWS Bedrock: prefer IAM role / instance profile over static access keys
+  - GCP Vertex AI: prefer Workload Identity / ADC over service account key files
+  - Azure OpenAI: prefer Managed Identity over API keys
+- Document the minimum IAM permissions required for each provider in README
+
+**General:**
+- `run.sh` warns if `.env` is world-readable (`chmod 600 .env` recommendation)
+- Credentials never written to `reports/` output files
+- All of the above validated in a `--check-credentials` dry-run mode that exits
+  without running the health check
 
 ---
 
