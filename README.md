@@ -30,16 +30,35 @@ The agent runs inside Docker, so Docker must be installed first.
 
 **macOS / Windows** — Install Docker Desktop from docker.com. It includes everything needed.
 
-**Linux** — Install Docker Engine and the Compose plugin:
+**Linux (Ubuntu / Debian)**
 ```bash
-# Ubuntu / Debian
 curl -fsSL https://get.docker.com | sh
 sudo apt-get install -y docker-compose-plugin
+# Allow running docker without sudo (log out and back in after this):
+sudo usermod -aG docker $USER
+newgrp docker
+```
 
-# RHEL / CentOS / Amazon Linux
-sudo yum install -y docker
-sudo systemctl start docker
-sudo yum install -y docker-compose-plugin
+**Linux (RHEL / CentOS / Amazon Linux 2023)**
+```bash
+sudo yum install -y docker docker-compose-plugin
+sudo systemctl enable --now docker
+# Allow running docker without sudo (log out and back in after this):
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+**Linux (Amazon Linux 2)**
+```bash
+sudo amazon-linux-extras install docker -y
+sudo systemctl enable --now docker
+# Install Compose plugin manually:
+COMPOSE_VERSION=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep tag_name | cut -d'"' -f4)
+sudo curl -SL "https://github.com/docker/compose/releases/download/${COMPOSE_VERSION}/docker-compose-linux-$(uname -m)" -o /usr/local/lib/docker/cli-plugins/docker-compose
+sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+# Allow running docker without sudo (log out and back in after this):
+sudo usermod -aG docker $USER
+newgrp docker
 ```
 
 Verify the installation:
@@ -51,6 +70,15 @@ docker compose version
 ---
 
 ### Step 2 — Download the app
+
+Install git if not already present:
+```bash
+# Ubuntu / Debian
+sudo apt-get install -y git
+
+# RHEL / CentOS / Amazon Linux
+sudo yum install -y git
+```
 
 The following command downloads the code into a new folder called `mongodb-agent-dba`:
 ```bash
@@ -144,9 +172,25 @@ docker compose --profile ollama up -d
 docker compose --profile ollama run --rm agent
 ```
 
-When the agent finishes, open the report:
+When the agent finishes, find the report:
+```bash
+ls -t reports/*.html | head -1
+```
+
+**macOS** — open in browser:
 ```bash
 open $(ls -t reports/*.html | head -1)
+```
+
+**Linux desktop** — open in browser:
+```bash
+xdg-open $(ls -t reports/*.html | head -1)
+```
+
+**Linux server (no GUI)** — copy the report to your local machine, then open it:
+```bash
+# Run this on your local machine, replacing SERVER_IP and /path/to/mongodb-agent-dba
+scp user@SERVER_IP:/path/to/mongodb-agent-dba/reports/*.html .
 ```
 
 ## Developing Locally (without Docker)
