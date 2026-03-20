@@ -28,10 +28,24 @@ investigations.
 
 The agent runs inside Docker, so Docker must be installed first.
 
-Download and install **Docker Desktop** from [docker.com](https://www.docker.com/products/docker-desktop/).
-After installation, verify it is running:
+**macOS / Windows** — Install Docker Desktop from docker.com. It includes everything needed.
+
+**Linux** — Install Docker Engine and the Compose plugin:
+```bash
+# Ubuntu / Debian
+curl -fsSL https://get.docker.com | sh
+sudo apt-get install -y docker-compose-plugin
+
+# RHEL / CentOS / Amazon Linux
+sudo yum install -y docker
+sudo systemctl start docker
+sudo yum install -y docker-compose-plugin
+```
+
+Verify the installation:
 ```bash
 docker --version
+docker compose version
 ```
 
 ---
