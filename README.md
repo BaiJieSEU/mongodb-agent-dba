@@ -177,14 +177,26 @@ Each run produces a separate timestamped report in `reports/`.
 
 ### Step 5 — Run
 
-**Option A, C, D, or E (cloud LLM):**
+The agent has two modes. Choose one:
+
+**Health check** — runs a full 8-section analysis and writes a report to `reports/`:
+
 ```bash
-docker compose up
+# Cloud LLM (Option A, C, D, or E):
+docker compose run --rm agent python src/main_agentic.py --health-check
+
+# Ollama (Option B):
+docker compose --profile ollama run --rm agent python src/main_agentic.py --health-check
 ```
 
-**Option B (Ollama) — if not already started in Step 3:**
+**Ask a question** — natural language investigation against your cluster:
+
 ```bash
-docker compose --profile ollama run --rm agent
+# Cloud LLM (Option A, C, D, or E):
+docker compose run --rm agent python src/main_agentic.py "my database is slow"
+
+# Ollama (Option B):
+docker compose --profile ollama run --rm agent python src/main_agentic.py "my database is slow"
 ```
 
 When the agent finishes, find the report:
