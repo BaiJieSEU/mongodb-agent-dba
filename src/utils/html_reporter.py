@@ -120,7 +120,7 @@ _CSS = """
 
   --t1: #f0f4fa;
   --t2: #a8b5c8;
-  --t3: #6b7a94;
+  --t3: #8294b2;   /* was #6b7a94 — raised for WCAG AA contrast */
 
   --red:   #f87171;
   --amber: #f59e0b;
@@ -151,14 +151,26 @@ body {
 /* ── Layout ── */
 .layout { display: flex; min-height: 100vh; }
 
+/* ── Sticky identity bar (BL-079) ── */
+.sticky-bar {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 20px; height: 44px; flex-shrink: 0;
+}
+.sticky-cluster { font-size: 13px; font-weight: 600; color: var(--t1); }
+.sticky-sep { color: var(--t3); font-size: 12px; }
+.sticky-sev { font-size: 12px; font-family: var(--mono); font-weight: 500; }
+.sticky-ts { font-size: 12px; color: var(--t3); font-family: var(--mono); margin-left: auto; }
+
 /* ── Sidebar ── */
 .sidebar {
   width: 224px; min-width: 224px;
   background: var(--surface);
   border-right: 1px solid var(--border);
   padding: 24px 0;
-  position: sticky; top: 0;
-  height: 100vh; overflow-y: auto;
+  position: sticky; top: 44px;
+  height: calc(100vh - 44px); overflow-y: auto;
   display: flex; flex-direction: column;
 }
 .sidebar-top {
@@ -166,14 +178,14 @@ body {
   border-bottom: 1px solid var(--border);
   margin-bottom: 14px;
 }
-.sidebar-cluster { font-size: 14px; font-weight: 600; color: var(--t1); margin-bottom: 3px; }
-.sidebar-meta { font-size: 11px; color: var(--t3); font-family: var(--mono); }
+.sidebar-cluster { font-size: 13px; font-weight: 600; color: var(--t1); margin-bottom: 3px; }
+.sidebar-meta { font-size: 12px; color: var(--t3); font-family: var(--mono); }
 
 .nav-group { padding: 0 10px; margin-bottom: 6px; }
 .nav-group-label {
-  font-size: 10px; color: var(--t3);
+  font-size: 11px; color: var(--t3);
   padding: 6px 8px 3px;
-  letter-spacing: 0.07em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 .nav-item {
@@ -206,20 +218,29 @@ body {
   font-size: 14px; font-weight: 600;
 }
 .score-info   { font-size: 12px; color: var(--t2); font-weight: 500; }
-.score-status { font-size: 11px; color: var(--t3); margin-top: 2px; }
+.score-status { font-size: 12px; color: var(--t3); margin-top: 2px; }
 
 /* ── Main ── */
 .main { flex: 1; padding: 36px 48px; max-width: 1040px; }
 
 /* ── Report header ── */
 .report-header {
-  display: flex; justify-content: space-between; align-items: flex-start;
   margin-bottom: 28px; padding-bottom: 22px; border-bottom: 1px solid var(--border);
 }
-.report-title { font-size: 20px; font-weight: 600; color: var(--t1); margin-bottom: 4px; }
-.report-sub   { font-size: 13px; color: var(--t3); }
-.report-right { text-align: right; font-size: 11px; color: var(--t3); font-family: var(--mono); line-height: 1.9; }
-.report-right strong { color: var(--t2); font-weight: 500; }
+.report-title { font-size: 18px; font-weight: 600; color: var(--t1); margin-bottom: 3px; }
+.report-cluster { font-size: 14px; font-weight: 600; color: var(--t2); margin-bottom: 6px; }
+.report-sub   { font-size: 12px; color: var(--t3); }
+
+/* ── Overall health summary (BL-080) ── */
+.overall-health {
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 16px 20px; margin-bottom: 10px;
+}
+.oh-left  { display: flex; align-items: center; gap: 12px; }
+.oh-label { font-size: 12px; color: var(--t3); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+.oh-score { font-size: 24px; font-weight: 700; font-family: var(--mono); line-height: 1; }
+.oh-denom { font-size: 12px; color: var(--t3); font-weight: 400; }
 
 /* ── Status bar — gap separator trick ── */
 .status-bar {
@@ -229,8 +250,8 @@ body {
   overflow: hidden; margin-bottom: 32px;
 }
 .status-cell { background: var(--surface); padding: 14px 16px; text-align: center; }
-.status-val  { font-size: 20px; font-weight: 600; font-family: var(--mono); margin-bottom: 4px; }
-.status-lbl  { font-size: 11px; color: var(--t3); letter-spacing: 0.02em; }
+.status-val  { font-size: 18px; font-weight: 600; font-family: var(--mono); margin-bottom: 4px; }
+.status-lbl  { font-size: 12px; color: var(--t2); letter-spacing: 0.01em; }
 .c-red   { color: var(--red); }
 .c-amber { color: var(--amber); }
 .c-green { color: var(--green); }
@@ -238,7 +259,7 @@ body {
 
 /* ── Section card ── */
 .section {
-  scroll-margin-top: 24px;
+  scroll-margin-top: 68px;
   border-left: 3px solid transparent;
   padding-left: 14px;
   margin-left: -14px;
@@ -253,7 +274,7 @@ body {
 }
 .section-title { font-size: 15px; font-weight: 600; color: var(--t1); }
 
-.tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-family: var(--mono); font-weight: 500; }
+.tag { font-size: 12px; padding: 2px 8px; border-radius: 4px; font-family: var(--mono); font-weight: 500; }
 .tag-red   { background: var(--red-bg);   color: var(--red);   border: 1px solid var(--red-border); }
 .tag-amber { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
 .tag-green { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
@@ -274,12 +295,14 @@ body {
 .alert-amber .alert-title { color: var(--amber); }
 .alert-green .alert-title { color: var(--green); }
 .alert-body { font-size: 13px; color: var(--t2); line-height: 1.6; }
-code { font-family: var(--mono); font-size: 11px; color: var(--t2); }
+code { font-family: var(--mono); font-size: 12px; color: var(--t2); }
 
 /* ── Findings list ── */
 .findings { list-style: none; font-size: 13px; line-height: 1.75; margin-top: 10px; }
 .findings li { padding: 1px 0; color: var(--t2); }
 .findings li::before { content: "· "; color: var(--t3); }
+.findings li.lead { color: var(--t1); font-weight: 500; }
+.findings li.lead::before { content: "· "; color: var(--t3); }
 .findings li.indent {
   padding-left: 1.4rem; color: var(--t3);
   font-family: var(--mono); font-size: 12px; line-height: 1.6;
@@ -299,11 +322,11 @@ code { font-family: var(--mono); font-size: 11px; color: var(--t2); }
 }
 .metric.m-crit { border-color: var(--red-border);   background: var(--red-bg); }
 .metric.m-warn { border-color: var(--amber-border); background: var(--amber-bg); }
-.metric-lbl { font-size: 11px; color: var(--t3); margin-bottom: 6px; letter-spacing: 0.02em; }
-.metric-val { font-size: 22px; font-weight: 600; font-family: var(--mono); margin-bottom: 2px; line-height: 1.1; }
-.metric-sub { font-size: 11px; color: var(--t3); }
+.metric-lbl { font-size: 12px; color: var(--t2); margin-bottom: 6px; letter-spacing: 0.01em; }
+.metric-val { font-size: 20px; font-weight: 600; font-family: var(--mono); margin-bottom: 2px; line-height: 1.1; }
+.metric-sub { font-size: 12px; color: var(--t3); }
 .metric-sub:empty { display: none; }
-.metric-limit { font-size: 11px; color: var(--t3); margin-top: 4px; border-top: 1px solid var(--border); padding-top: 4px; }
+.metric-limit { font-size: 12px; color: var(--t3); margin-top: 4px; border-top: 1px solid var(--border); padding-top: 4px; }
 
 /* ── Placeholder ── */
 .placeholder {
@@ -326,7 +349,7 @@ code { font-family: var(--mono); font-size: 11px; color: var(--t2); }
 }
 .rec-item:last-child { border-bottom: none; }
 .rec-p {
-  font-size: 11px; font-family: var(--mono); font-weight: 600;
+  font-size: 12px; font-family: var(--mono); font-weight: 600;
   padding: 3px 7px; border-radius: 4px; flex-shrink: 0; margin-top: 2px;
 }
 .rp0 { background: var(--red-bg);   color: var(--red);   border: 1px solid var(--red-border); }
@@ -341,14 +364,14 @@ code { font-family: var(--mono); font-size: 11px; color: var(--t2); }
   display: block; margin: 6px 0 8px;
   overflow-wrap: break-word; word-break: break-word;
 }
-.rec-evidence { font-size: 12px; color: var(--t3); line-height: 1.6; margin-bottom: 6px; }
+.rec-evidence { font-size: 12px; color: var(--t2); line-height: 1.6; margin-bottom: 6px; }
 .rec-meta { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-.conf-high { color: var(--green); font-size: 11px; font-family: var(--mono); }
-.conf-med  { color: var(--amber); font-size: 11px; font-family: var(--mono); }
-.conf-low  { color: var(--t3);   font-size: 11px; font-family: var(--mono); }
-.conf-llm  { color: var(--blue); font-size: 11px; font-family: var(--mono); }
+.conf-high { color: var(--green); font-size: 12px; font-family: var(--mono); }
+.conf-med  { color: var(--amber); font-size: 12px; font-family: var(--mono); }
+.conf-low  { color: var(--t3);   font-size: 12px; font-family: var(--mono); }
+.conf-llm  { color: var(--blue); font-size: 12px; font-family: var(--mono); }
 .badge-ai {
-  font-size: 10px; font-family: var(--mono); font-weight: 600;
+  font-size: 11px; font-family: var(--mono); font-weight: 600;
   padding: 2px 6px; border-radius: 3px;
   background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border);
 }
@@ -357,7 +380,7 @@ code { font-family: var(--mono); font-size: 11px; color: var(--t2); }
 /* ── Footer ── */
 .report-footer {
   padding: 20px 0 8px; text-align: center;
-  font-size: 11px; color: var(--t3);
+  font-size: 12px; color: var(--t3);
   border-top: 1px solid var(--border);
   margin-top: 8px; font-family: var(--mono);
 }
@@ -366,14 +389,37 @@ code { font-family: var(--mono); font-size: 11px; color: var(--t2); }
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-thumb { background: var(--border-em); border-radius: 3px; }
 
+/* ── Rating explainer (BL-080) ── */
+.rating-info {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 8px 14px; margin-bottom: 24px;
+}
+.rating-info > summary {
+  cursor: pointer; color: var(--t3); font-size: 11px;
+  letter-spacing: 0.02em; user-select: none; list-style: none;
+}
+.rating-info > summary::-webkit-details-marker { display: none; }
+.rating-info > summary::before { content: "▶  "; font-size: 9px; }
+.rating-info[open] > summary::before { content: "▼  "; }
+.rating-info > summary:hover { color: var(--t2); }
+.rating-body {
+  margin-top: 10px; display: flex; flex-direction: column; gap: 6px;
+  color: var(--t2); font-size: 12px; line-height: 1.6;
+}
+.rating-body strong { color: var(--t1); }
+.rating-formula {
+  font-family: var(--mono); font-size: 11px; color: var(--t3);
+  background: var(--surface); padding: 4px 10px; border-radius: 4px; margin-top: 2px;
+}
+
 /* ── Responsive ── */
 @media (max-width: 820px) {
   .layout { flex-direction: column; }
-  .sidebar { width: 100%; height: auto; position: relative; overflow: visible; }
+  .sidebar { width: 100%; height: auto; position: relative; top: 0; overflow: visible; }
   .main { padding: 20px 16px; max-width: none; }
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
-  .report-header { flex-direction: column; gap: 12px; }
-  .report-right { text-align: left; }
+  .overall-health { flex-direction: column; align-items: flex-start; gap: 8px; }
+  .section { scroll-margin-top: 24px; }
 }
 """
 
@@ -385,6 +431,70 @@ def _health_score(report: HealthCheckReport) -> int:
         return 100
     weights = {HealthSeverity.OK: 1.0, HealthSeverity.WARNING: 0.6, HealthSeverity.CRITICAL: 0.0}
     return round(sum(weights[s.severity] for s in report.sections) / len(report.sections) * 100)
+
+
+def _sticky_bar(cluster_label: str, severity: HealthSeverity, ts: str) -> str:
+    """Sticky top bar showing cluster identity — BL-079."""
+    sev_color = _COLOR[severity]
+    sev_label = _TAG_LABEL[severity]
+    return (
+        f'<div class="sticky-bar">'
+        f'<span class="sticky-cluster">{cluster_label}</span>'
+        f'<span class="sticky-sep">·</span>'
+        f'<span class="sticky-sev" style="color:{sev_color}">{sev_label}</span>'
+        f'<span class="sticky-ts">{ts}</span>'
+        f'</div>'
+    )
+
+
+def _overall_health_summary(report: HealthCheckReport) -> str:
+    """Overall severity badge + health score block — BL-080."""
+    score     = _health_score(report)
+    sev_color = _COLOR[report.overall_severity]
+    sev_label = _TAG_LABEL[report.overall_severity]
+    tag_cls   = _TAG[report.overall_severity]
+    return (
+        f'<div class="overall-health">'
+        f'<div class="oh-left">'
+        f'<span class="oh-label">Overall health</span>'
+        f'<span class="tag {tag_cls}">{sev_label}</span>'
+        f'</div>'
+        f'<div class="oh-score" style="color:{sev_color}">'
+        f'{score}<span class="oh-denom">&thinsp;/&thinsp;100</span>'
+        f'</div>'
+        f'</div>'
+    )
+
+
+def _rating_explainer(report: HealthCheckReport) -> str:
+    """Collapsible formula explanation for overall severity and health score — BL-080."""
+    n = len(report.sections)
+    if n == 0:
+        return ""
+    score  = _health_score(report)
+    n_ok   = sum(1 for s in report.sections if s.severity == HealthSeverity.OK)
+    n_warn = sum(1 for s in report.sections if s.severity == HealthSeverity.WARNING)
+    n_crit = sum(1 for s in report.sections if s.severity == HealthSeverity.CRITICAL)
+
+    parts: list[str] = []
+    if n_crit: parts.append(f"{n_crit}&thinsp;×&thinsp;Critical (0&thinsp;pts)")
+    if n_warn: parts.append(f"{n_warn}&thinsp;×&thinsp;Warning (60&thinsp;pts)")
+    if n_ok:   parts.append(f"{n_ok}&thinsp;×&thinsp;OK (100&thinsp;pts)")
+    worked = " + ".join(parts) + f"  /  {n}  =  <strong>{score}</strong>"
+
+    return (
+        f'<details class="rating-info">'
+        f'<summary>How is this score calculated?</summary>'
+        f'<div class="rating-body">'
+        f'<p><strong>Overall severity</strong> (banner) is worst-case: one Critical section makes the'
+        f' entire cluster Critical; one Warning with all others OK → Warning.</p>'
+        f'<p><strong>Health score</strong> (gauge, 0–100) is a weighted average across all {n} sections:'
+        f' OK&nbsp;=&nbsp;100&thinsp;pts &middot; Warning&nbsp;=&nbsp;60&thinsp;pts &middot; Critical&nbsp;=&nbsp;0&thinsp;pts.</p>'
+        f'<p class="rating-formula">This run: {worked}</p>'
+        f'</div>'
+        f'</details>'
+    )
+
 
 def _fmt(v: object) -> str:
     if isinstance(v, float): return f"{v:,.1f}"
@@ -409,7 +519,7 @@ def _is_breached(sig) -> bool:
 # ── sidebar ────────────────────────────────────────────────────────────────────
 
 def _sidebar(report: HealthCheckReport, score: int) -> str:
-    cluster  = report.cluster_uri.split("@")[-1] if "@" in report.cluster_uri else report.cluster_uri
+    cluster  = report.cluster_name or (report.cluster_uri.split("@")[-1] if "@" in report.cluster_uri else report.cluster_uri)
     date_str = report.timestamp.strftime("%Y-%m-%d · %H:%M UTC")
 
     by_name  = {s.name: s for s in report.sections}
@@ -558,35 +668,21 @@ def _findings_html(section: ReportSection) -> str:
     if not section.findings:
         return ""
 
-    alert_cls = {
-        HealthSeverity.CRITICAL: "alert-red",
-        HealthSeverity.WARNING:  "alert-amber",
-        HealthSeverity.OK:       "alert-green",
-    }[section.severity]
-
-    parts: list[str] = []
-    alert_shown = False
     list_items: list[str] = []
-
-    for line in section.findings:
+    for i, line in enumerate(section.findings):
         stripped = line.strip()
         if not stripped:
             continue
         is_indent = line.startswith("  ")
-        if not is_indent and not alert_shown and section.severity != HealthSeverity.OK:
-            parts.append(
-                f'<div class="alert {alert_cls}">'
-                f'<div class="alert-title">{stripped}</div>'
-                f'</div>'
-            )
-            alert_shown = True
+        if is_indent:
+            list_items.append(f'<li class="indent">{stripped}</li>')
+        elif i == 0 and section.severity != HealthSeverity.OK:
+            # First finding is the headline — render bold, no coloured box
+            list_items.append(f'<li class="lead">{stripped}</li>')
         else:
-            cls = "indent" if is_indent else ""
-            list_items.append(f'<li class="{cls}">{stripped}</li>')
+            list_items.append(f'<li>{stripped}</li>')
 
-    if list_items:
-        parts.append(f'<ul class="findings">{"".join(list_items)}</ul>')
-    return "".join(parts)
+    return f'<ul class="findings">{"".join(list_items)}</ul>'
 
 
 # ── section card ─────────────────────────────────────────────────────────────
@@ -788,19 +884,23 @@ navLinks.forEach(link => {
 
 def render_html(report: HealthCheckReport) -> str:
     """Render a HealthCheckReport as a self-contained HTML string."""
-    score   = _health_score(report)
-    cluster = report.cluster_uri.split("@")[-1] if "@" in report.cluster_uri else report.cluster_uri
-    ts      = report.timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
+    score         = _health_score(report)
+    cluster_label = report.cluster_name or (report.cluster_uri.split("@")[-1] if "@" in report.cluster_uri else report.cluster_uri)
+    ts            = report.timestamp.strftime("%Y-%m-%d %H:%M:%S UTC")
+    ts_short      = report.timestamp.strftime("%Y-%m-%d %H:%M UTC")
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MongoDB health report — {cluster}</title>
+  <title>MongoDB health report — {cluster_label}</title>
   <style>{_CSS}</style>
 </head>
 <body>
+
+{_sticky_bar(cluster_label, report.overall_severity, ts_short)}
+
 <div class="layout">
 
 {_sidebar(report, score)}
@@ -808,16 +908,14 @@ def render_html(report: HealthCheckReport) -> str:
 <main class="main">
 
   <div class="report-header">
-    <div>
-      <div class="report-title">MongoDB cluster health report</div>
-      <div class="report-sub">Automated diagnostic · {len(report.sections)} sections · {len(report.recommendations)} recommendation{"s" if len(report.recommendations) != 1 else ""}</div>
-    </div>
-    <div class="report-right">
-      <div><strong>{cluster}</strong></div>
-      <div>Run&thinsp;{report.run_id}</div>
-      <div>{ts}</div>
-    </div>
+    <div class="report-title">MongoDB cluster health report</div>
+    <div class="report-cluster">{cluster_label}</div>
+    <div class="report-sub">{ts} &middot; Run&thinsp;{report.run_id} &middot; {len(report.sections)} sections &middot; {len(report.recommendations)} recommendation{"s" if len(report.recommendations) != 1 else ""}</div>
   </div>
+
+  {_overall_health_summary(report)}
+
+  {_rating_explainer(report)}
 
   {_status_bar(report)}
 
@@ -828,7 +926,7 @@ def render_html(report: HealthCheckReport) -> str:
   {_recommendations_html(report.recommendations)}
 
   <div class="report-footer">
-    mongodb-dba-agent · {cluster} · {ts}
+    mongodb-dba-agent · {cluster_label} · {ts}
   </div>
 
 </main>

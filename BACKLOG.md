@@ -24,7 +24,7 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-032 | LangChain multi-LLM backend | P0 | M | 4 | ✅ Done |
 | BL-010 | Health check pipeline | P0 | L | 2 | ✅ Done |
 | BL-011 | Configurable scheduler | P0 | L | 2 | 🔲 |
-| BL-030 | Structured tool output (typed) | P0 | L | 4 | 🔲 |
+| BL-030 | Structured tool output (typed) | P0 | L | 4 | ✅ Done |
 | BL-070 | Docker Compose deployment | P0 | L | 8 | ✅ Done |
 | BL-009 | Operations health section (serverStatus metrics) | P1 | M | 1 | ✅ Done |
 | BL-013 | Connection pool health section | P1 | M | 1 | 🔲 |
@@ -35,6 +35,8 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-007 | Duplicate/redundant index detection | P1 | S | 1 | 🔲 |
 | BL-023 | Confidence scoring on recommendations | P1 | S | 3 | ✅ Done |
 | BL-074 | PS delivery runbook (< 30 min) | P1 | S | 8 | 🔲 |
+| BL-078 | Fleet report — scalable cluster navigation | P1 | S | 7 | ✅ Done |
+| BL-079 | Sticky cluster identity header in HTML report | P1 | S | 7 | ✅ Done |
 | BL-008 | Aggregation pipeline analysis | P1 | M | 1 | 🔲 |
 | BL-012 | Trend comparison in scheduled runs | P1 | M | 2 | 🔲 |
 | BL-022 | Webhook / notification output | P1 | M | 3 | 🔲 |
@@ -43,25 +45,26 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-060 | HTML report output | P1 | M | 7 | ✅ Done |
 | BL-073 | Secret management integration | P1 | M | 8 | 🔲 |
 | BL-077 | Credential security best practices | P1 | M | 8 | 🔲 |
-| BL-050 | Multi-cluster support | P1 | L | 6 | 🔶 Partial |
-| BL-076 | Multi-cluster unified report | P1 | L | 6 | 🔲 |
+| BL-050 | Multi-cluster support | P1 | L | 6 | ✅ Done |
+| BL-076 | Multi-cluster unified report | P1 | L | 6 | ✅ Done |
 | BL-033 | ESR index order validation | P2 | S | 4 | 🔲 |
 | BL-041 | Approval-gated profiler config | P2 | S | 5 | 🔲 |
 | BL-052 | Immutable audit trail | P2 | S | 6 | 🔲 |
 | BL-061 | Markdown report output | P2 | S | 7 | ✅ Done |
 | BL-075 | Data sovereignty mode | P2 | S | 8 | 🔲 |
+| BL-080 | Health rating formula — transparency in report | P2 | S | 7 | ✅ Done |
 | BL-072 | Non-Docker quickstart script | P2 | M | 8 | 🔲 |
 | BL-040 | Approval-gated index creation | P2 | L | 5 | 🔲 |
 | BL-051 | REST API + Web UI | P2 | XL | 6 | 🔲 |
 | BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
 | BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
 
-**Done:** 15 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014, BL-009, BL-034, BL-070)
-**Partial:** 2 items (BL-050 — within-cluster multi-DB done; BL-071 — LLM+MongoDB env vars done, full coverage pending)
-**P0:** 3 remaining — scheduler (BL-011), baseline severity (BL-021), typed output (BL-030)
-**P1:** 18 items — high-value once P0 is in place
-**P2–P3:** 9 items — important but not blocking
-**Total:** 42 items across 8 epics (15 done, 2 partial, 25 remaining)
+**Done:** 21 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014, BL-009, BL-034, BL-070, BL-030, BL-050, BL-076, BL-078, BL-079, BL-080)
+**Partial:** 1 item (BL-071 — LLM+MongoDB env vars done, full coverage pending)
+**P0:** 2 remaining — scheduler (BL-011), baseline severity (BL-021)
+**P1:** 20 items — high-value once P0 is in place
+**P2–P3:** 10 items — important but not blocking
+**Total:** 45 items across 8 epics (15 done, 2 partial, 28 remaining)
 
 ---
 
@@ -422,18 +425,31 @@ LangChain provides a unified interface for all four without changing business lo
 
 ---
 
-### BL-030 · Structured tool output (typed results)
+### BL-030 · Structured tool output (typed results) ✅ Done
 **Priority:** P0 | **Size:** L
 
 **Story:** As a developer, I want MCP tool results parsed into typed Python
-dataclasses before being passed to the LLM so that string-parsing bugs are eliminated
+structures before being passed to the LLM so that string-parsing bugs are eliminated
 and the LLM receives clean structured JSON.
 
-**Acceptance criteria:**
-- Each `_tool_*` method returns a typed dataclass (e.g. `SlowQueryResult`, `IndexStatsResult`)
-- LLM receives `json.dumps(dataclass.to_dict())` not raw MCP text blocks
-- Parsing errors produce a structured error result, not a silent empty list
-- Existing tests pass; new unit tests cover each parser
+**Implemented:** All MCP string-parsing moved into `MCPClient` as typed tool methods.
+Callers receive Python-native types (lists, dicts, ints, floats) — no more inline
+`b.startswith("Name:")` / `json.loads(block)` / `re.search(...)` scattered across
+the codebase.
+
+**New typed methods on `MCPClient`:**
+- `list_databases()` → `List[str]`
+- `list_collections(db)` → `List[str]`
+- `find(db, coll, filter, sort, limit)` → `List[Dict]`
+- `db_stats(db)` → `Dict`
+- `collection_storage_size(db, coll)` → `float` (MB)
+- `count(db, coll, filter)` → `int`
+- `aggregate(db, coll, pipeline)` → `List[Dict]`
+- `collection_indexes(db, coll)` → `List[Dict]` with `name` and `fields`
+- `explain(db, coll, method)` → `str`
+
+`HealthCheckRunner` `_parse_*` static methods removed. `intelligent_agentic_agent.py`
+tool handlers updated. `re` import removed from `health_check_runner.py`.
 
 ---
 
@@ -524,23 +540,26 @@ reviewing the zero-usage evidence.
 
 ### BL-050 · Multi-cluster support
 **Priority:** P1 | **Size:** L
-**Status:** 🔶 Partial — within-cluster multi-database discovery is done; multi-cluster registration is not.
+**Status:** ✅ Done
 
 **Story:** As a DBA managing more than one MongoDB cluster, I want to run a health
 check against any registered cluster by name so I don't need to edit config files.
 
-**Done (v0.3.0):**
+**Done:**
 - `_section_query_performance` iterates all user databases discovered via `list-databases` —
   no database name is hardcoded. Deploy to any cluster; all databases are picked up automatically.
 - `_top_slow_collections` returns `{"db", "collection"}` dicts so the correct database is used
   in §6 index checks regardless of which database a slow query came from.
-
-**Remaining:**
-- `monitored_clusters` list in config replaces single `monitored_cluster` URI
-- Each cluster has a `name`, `uri`, and optional `tags` (e.g. `production`, `staging`)
-- CLI accepts `--cluster <name>` flag
-- Memory store scoped per cluster URI (investigations tagged with cluster name)
-- Health check report header includes cluster name
+- `monitored_clusters` list in `agent_config.yaml` (name + uri + tags); backward-compat with
+  `monitored_cluster` — synthesised into clusters list if the new field is absent.
+- `ClusterConfig` model in `config_loader.py`; `MongoDBConfig.get_cluster(name)` lookup helper.
+- `AGENT_MONGO_CLUSTERS=uri1,uri2` env var overrides the clusters list (names auto-derived
+  from hostnames).
+- CLI `--cluster <name>` flag selects which registered cluster to target; defaults to `clusters[0]`.
+- `HealthCheckRunner(config, cluster_uri, cluster_name)` — uses the selected URI; report header
+  and `HealthCheckReport.cluster_name` field populated.
+- `Investigation.cluster_uri` and `PerformanceIssue.cluster_uri` stored in agent memory so
+  investigations are scoped per cluster.
 
 ---
 
@@ -860,6 +879,82 @@ Optional provider packages (`langchain-anthropic`, `langchain-openai`, `langchai
 imported lazily with clear error messages if not installed.
 `IntelligentAgenticDBAAgent` updated to use `build_llm(config)`. Prerequisites check is now
 provider-aware. `.env.example` committed with all variable names and descriptions.
+
+---
+
+### BL-078 · Fleet report — scalable cluster navigation
+**Priority:** P1 | **Size:** S | **Epic:** 7
+
+**Story:** As a DBA managing a large fleet, I want the multi-cluster HTML report to
+remain navigable when there are 10 or more clusters, so I can switch between them
+without the tab bar becoming a cramped horizontal scroller.
+
+**Problem:** The current `cluster-tabs` bar is a flex row with `overflow-x: auto`.
+At ~8+ clusters, tab labels are truncated or require horizontal scrolling; the bar
+gives no indication that more clusters exist off-screen. The layout breaks further
+when cluster names are long (e.g. `prod-eu-west-replica-set-primary`).
+
+**Acceptance criteria:**
+- For ≤ 6 clusters: keep the existing horizontal tab bar (no visible change).
+- For > 6 clusters: replace the tab bar with a compact dropdown `<select>` or
+  a collapsible sidebar list so all cluster names are accessible regardless of count.
+- Each entry still carries a severity-coloured dot (OK=green, WARNING=amber, CRITICAL=red).
+- Switching clusters is instant (no page reload); current cluster is clearly highlighted.
+- No new JS libraries — plain CSS + vanilla JS only.
+- Test with a synthetic 10-cluster report to confirm no overflow or clipping.
+
+---
+
+### BL-079 · Sticky cluster identity header in HTML report
+**Priority:** P1 | **Size:** S | **Epic:** 7
+
+**Story:** As a DBA reviewing a long health report, I always want to know which
+cluster I am looking at without having to scroll back to the top, so I can avoid
+acting on the wrong cluster's findings.
+
+**Problem:** In both the single-cluster (`html_reporter.py`) and multi-cluster
+(`multi_cluster_html_reporter.py`) HTML reports, the cluster name is only shown
+in the `report-header` div at the top of the main pane. Once the user scrolls past
+the header, there is no persistent indicator of which cluster is active.
+
+**Acceptance criteria:**
+- A sticky bar is rendered at the top of the viewport (CSS `position: sticky; top: 0`)
+  and remains visible at all scroll depths.
+- The bar shows: cluster name · overall severity badge · run timestamp.
+- On the fleet report the bar updates when the user switches clusters (JS).
+- The bar must not obscure in-page anchor targets (account for bar height in offset).
+- Dark-theme consistent with existing CSS palette; ≤ 32 px tall.
+- Applies to both `html_reporter.py` (single-cluster) and `multi_cluster_html_reporter.py`.
+
+---
+
+### BL-080 · Health rating formula — transparency in report
+**Priority:** P2 | **Size:** S | **Epic:** 7
+
+**Story:** As a DBA, I want to understand exactly how the Overall Health rating and
+the Health Score are calculated, so I can explain the numbers to my team and trust
+that the report is not a black box.
+
+**Background — two separate ratings exist today:**
+
+| Rating | Where shown | Formula |
+|---|---|---|
+| Overall severity | Banner (OK / WARNING / CRITICAL) | `worst_severity()` = `max(section_severities)` — if *any* section is CRITICAL, the cluster is CRITICAL |
+| Health score | Sidebar gauge (0–100) | Weighted average: OK=1.0 · WARNING=0.6 · CRITICAL=0.0, averaged across all sections × 100 |
+
+Neither formula is documented or visible anywhere in the generated report. A user
+seeing "WARNING · 86 / 100" has no way to know why the banner is WARNING while the
+score is 86.
+
+**Acceptance criteria:**
+- A small "How is this calculated?" tooltip or collapsible info block is rendered
+  immediately below the overall severity banner in both single-cluster and fleet HTML reports.
+- The tooltip/block explains in plain English:
+  - Overall severity: worst-case — one CRITICAL section makes the whole cluster CRITICAL.
+  - Health score: weighted average across all sections (OK=100 pts, WARNING=60 pts, CRITICAL=0 pts).
+  - Example: "8 sections · 1 WARNING · 7 OK → score = (7×100 + 1×60) / 8 = 95"
+- No new dependencies; pure HTML/CSS inline tooltip or `<details>` element.
+- The explanation is also included in the Markdown report as a brief footnote.
 
 ---
 

@@ -174,6 +174,9 @@ def _parse_llm_response(raw: str) -> List[Recommendation]:
 
 # ── public class ───────────────────────────────────────────────────────────────
 
+_LLM_ENRICHMENT_TIMEOUT_S = 60  # give the LLM up to 60 s; skip enrichment if exceeded
+
+
 class LLMRecommender:
     """Enriches rule-based health check recommendations with LLM cross-section reasoning."""
 
@@ -187,19 +190,47 @@ class LLMRecommender:
         The report must already have rule-based recommendations attached
         (health_check_runner calls _build_recommendations first, then this).
 
-        On any failure returns report.recommendations unchanged — LLM enrichment
-        is best-effort and must never break the health check pipeline.
+        Runs in a background thread with a hard timeout so a slow or unresponsive
+        LLM never blocks the health check pipeline.  On timeout or any failure,
+        returns report.recommendations unchanged — enrichment is always best-effort.
         """
-        try:
-            summary = _report_to_prompt_json(report)
-            prompt  = f"{_SYSTEM_PROMPT}\n\nHealth Check Report:\n{summary}"
-            raw     = self._llm.invoke(prompt)
+        import concurrent.futures
+
+        def _invoke() -> List[Recommendation]:
+            summary  = _report_to_prompt_json(report)
+            prompt   = f"{_SYSTEM_PROMPT}\n\nHealth Check Report:\n{summary}"
+            raw      = self._llm.invoke(prompt)
             new_recs = _parse_llm_response(raw)
             if new_recs:
                 logger.info("LLM enrichment produced %d additional recommendation(s)", len(new_recs))
             else:
                 logger.info("LLM enrichment: no additional recommendations")
             return report.recommendations + new_recs
-        except Exception as exc:
-            logger.warning("LLM recommendation enrichment failed (non-fatal): %s", exc)
+
+        import threading
+
+        result_box: list = [None]
+        error_box:  list = [None]
+
+        def _run() -> None:
+            try:
+                result_box[0] = _invoke()
+            except Exception as exc:
+                error_box[0] = exc
+
+        # daemon=True: thread is killed automatically when the main process exits,
+        # so a slow LLM never keeps the process alive after the report is saved.
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        t.join(timeout=_LLM_ENRICHMENT_TIMEOUT_S)
+
+        if t.is_alive():
+            logger.warning(
+                "LLM enrichment timed out after %ds — using rule-based recommendations only",
+                _LLM_ENRICHMENT_TIMEOUT_S,
+            )
             return report.recommendations
+        if error_box[0] is not None:
+            logger.warning("LLM recommendation enrichment failed (non-fatal): %s", error_box[0])
+            return report.recommendations
+        return result_box[0]
