@@ -19,7 +19,7 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-002 | Replication health tool | P0 | M | 1 | ✅ Done |
 | BL-003 | Collection storage stats tool | P0 | M | 1 | ✅ Done |
 | BL-004 | Index usage statistics tool | P0 | M | 1 | ✅ Done |
-| BL-021 | Baseline-aware severity assessment | P0 | M | 3 | 🔲 |
+| BL-021 | Baseline-aware severity assessment | P0 | M | 3 | ✅ Done |
 | BL-071 | Environment variable + secret config | P0 | S | 8 | 🔶 Partial |
 | BL-032 | LangChain multi-LLM backend | P0 | M | 4 | ✅ Done |
 | BL-010 | Health check pipeline | P0 | L | 2 | ✅ Done |
@@ -59,9 +59,9 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
 | BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
 
-**Done:** 21 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014, BL-009, BL-034, BL-070, BL-030, BL-050, BL-076, BL-078, BL-079, BL-080)
+**Done:** 22 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014, BL-009, BL-034, BL-070, BL-030, BL-050, BL-076, BL-078, BL-079, BL-080, BL-021)
 **Partial:** 1 item (BL-071 — LLM+MongoDB env vars done, full coverage pending)
-**P0:** 2 remaining — scheduler (BL-011), baseline severity (BL-021)
+**P0:** 1 remaining — scheduler (BL-011)
 **P1:** 20 items — high-value once P0 is in place
 **P2–P3:** 10 items — important but not blocking
 **Total:** 45 items across 8 epics (15 done, 2 partial, 28 remaining)

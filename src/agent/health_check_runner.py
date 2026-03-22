@@ -30,7 +30,6 @@ Section order:
 
 import json
 import logging
-import re
 import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -77,8 +76,15 @@ _SYSTEM_DBS = {"admin", "config", "local"}
 class HealthCheckRunner:
     """Runs a complete cluster health check using MCP tools and produces a report."""
 
-    def __init__(self, config: AppConfig):
+    def __init__(
+        self,
+        config: AppConfig,
+        cluster_uri: Optional[str] = None,
+        cluster_name: str = "",
+    ):
         self.config = config
+        self._cluster_uri = cluster_uri or config.mongodb.monitored_cluster
+        self._cluster_name = cluster_name
         self._mcp: Optional[MCPClient] = None
         self._mongo: Optional[MongoDBManager] = None
 
@@ -93,17 +99,22 @@ class HealthCheckRunner:
         # Direct PyMongo connection for §8 (serverStatus — not in MCP toolset)
         self._mongo = MongoDBManager(
             agent_store_uri=self.config.mongodb.agent_store,
-            monitored_cluster_uri=self.config.mongodb.monitored_cluster,
+            monitored_cluster_uri=self._cluster_uri,
         )
 
+        # BL-021: baseline-aware severity — load prior runs from agent_memory
+        from agent.baseline_manager import BaselineManager
+        self._baseline = BaselineManager(
+            self.config.mongodb.agent_store, self._cluster_uri
+        )
+        self._baseline.load()
+
         try:
-            with MCPClient(self.config.mongodb.monitored_cluster) as mcp:
+            with MCPClient(self._cluster_uri) as mcp:
                 self._mcp = mcp
 
                 # Fetch user databases once — shared by sections 1, 3, 4, 7
-                db_blocks = self._mcp.call_tool("list-databases", {})
-                all_dbs = self._parse_name_blocks(db_blocks)
-                user_dbs = [d for d in all_dbs if d not in _SYSTEM_DBS]
+                user_dbs = [d for d in self._mcp.list_databases() if d not in _SYSTEM_DBS]
 
                 # Fixed, deterministic section order
                 sections.append(self._section_cluster_overview(user_dbs))
@@ -131,7 +142,8 @@ class HealthCheckRunner:
         report = HealthCheckReport(
             run_id=run_id,
             timestamp=timestamp,
-            cluster_uri=self.config.mongodb.monitored_cluster,
+            cluster_uri=self._cluster_uri,
+            cluster_name=self._cluster_name,
             overall_severity=overall,
             sections=sections,
             recommendations=recommendations,
@@ -142,73 +154,20 @@ class HealthCheckRunner:
             from agent.llm_recommender import LLMRecommender
             logger.info("BL-034: running LLM recommendation enrichment")
             report.recommendations = LLMRecommender(self.config).enrich(report)
+
+        # BL-021: persist this run's metrics for future baseline comparisons
+        self._baseline.record_from_report(report)
+
         report.report_path = str(self._save_report(report))
         self._purge_old_reports()
         return report
-
-    # ── MCP output parsers ─────────────────────────────────────────────────────
-
-    @staticmethod
-    def _parse_name_blocks(blocks: List[str]) -> List[str]:
-        """Extract name from 'Name: foo' or 'Name: foo, Size: ...' MCP blocks."""
-        names = []
-        for b in blocks:
-            if b.startswith("Name:"):
-                raw = b[len("Name:"):].strip()
-                names.append(raw.split(",")[0].strip())
-        return names
-
-    @staticmethod
-    def _parse_db_stats(blocks: List[str]) -> Optional[Dict[str, Any]]:
-        """Parse 'Statistics for database X: {json}' MCP block."""
-        for b in blocks:
-            if b.startswith("Statistics for database"):
-                try:
-                    return json.loads(b[b.index("{"):])
-                except (ValueError, json.JSONDecodeError):
-                    pass
-        return None
-
-    @staticmethod
-    def _parse_storage_size_mb(blocks: List[str]) -> float:
-        """Parse 'The size of `db.coll` is `N.NN MB`' block → float MB."""
-        for b in blocks:
-            m = re.search(r"is `([\d.]+)\s*(MB|KB|GB|bytes)`", b)
-            if m:
-                val, unit = float(m.group(1)), m.group(2)
-                if unit == "KB":    return round(val / 1024, 3)
-                if unit == "GB":    return round(val * 1024, 3)
-                if unit == "bytes": return round(val / 1_048_576, 6)
-                return round(val, 3)   # MB
-        return 0.0
-
-    @staticmethod
-    def _parse_count(blocks: List[str]) -> int:
-        """Parse 'Found N documents' block → int."""
-        for b in blocks:
-            m = re.search(r"Found ([\d,]+) documents", b)
-            if m:
-                return int(m.group(1).replace(",", ""))
-        return 0
-
-    @staticmethod
-    def _parse_json_docs(blocks: List[str]) -> List[Dict[str, Any]]:
-        """Parse MCP aggregate/find result blocks (skip header, parse JSON docs)."""
-        docs = []
-        for b in blocks[1:]:
-            try:
-                docs.append(json.loads(b))
-            except (json.JSONDecodeError, TypeError):
-                pass
-        return docs
 
     # ── Section 1: Cluster Overview ────────────────────────────────────────────
 
     def _section_cluster_overview(self, user_dbs: List[str]) -> ReportSection:
         collections_by_db: Dict[str, List[str]] = {}
         for db in user_dbs:
-            coll_blocks = self._mcp.call_tool("list-collections", {"database": db})
-            colls = self._parse_name_blocks(coll_blocks)
+            colls = self._mcp.list_collections(db)
             collections_by_db[db] = [c for c in colls if not c.startswith("system.")]
 
         total_colls = sum(len(v) for v in collections_by_db.values())
@@ -236,14 +195,8 @@ class HealthCheckRunner:
                              — these require serverStatus which has no MCP equivalent.
         """
         # Version, hostname, uptime from startup_log
-        startup_blocks = self._mcp.call_tool("find", {
-            "database": "local",
-            "collection": "startup_log",
-            "sort": {"startTime": -1},
-            "limit": 1,
-        })
         version, hostname, uptime_hours = "unknown", "unknown", 0.0
-        for doc in self._parse_json_docs(startup_blocks):
+        for doc in self._mcp.find("local", "startup_log", sort={"startTime": -1}, limit=1):
             version = doc.get("buildinfo", {}).get("version", "unknown")
             hostname = doc.get("hostname", "unknown")
             start_str = doc.get("startTime", "")
@@ -257,20 +210,19 @@ class HealthCheckRunner:
                     pass
 
         # Disk usage from db-stats (fsUsedSize / fsTotalSize is cluster-wide)
-        stats_blocks = self._mcp.call_tool("db-stats", {"database": "admin"})
-        stats = self._parse_db_stats(stats_blocks) or {}
+        stats = self._mcp.db_stats("admin")
         fs_used  = stats.get("fsUsedSize",  0)
         fs_total = stats.get("fsTotalSize", 0)
         disk_used_gb  = round(fs_used  / 1_073_741_824, 1)
         disk_total_gb = round(fs_total / 1_073_741_824, 1)
         disk_used_pct = round(fs_used / fs_total * 100, 1) if fs_total else 0.0
 
-        if disk_used_pct >= _THRESHOLDS["disk_used_pct_critical"]:
-            severity = HealthSeverity.CRITICAL
-        elif disk_used_pct >= _THRESHOLDS["disk_used_pct_warning"]:
-            severity = HealthSeverity.WARNING
-        else:
-            severity = HealthSeverity.OK
+        # BL-021: baseline-aware disk severity (hard limit: > 95% always CRITICAL)
+        severity, disk_note = self._baseline.assess(
+            "disk_used_pct", disk_used_pct,
+            static_warn=_THRESHOLDS["disk_used_pct_warning"],
+            static_crit=_THRESHOLDS["disk_used_pct_critical"],
+        )
 
         findings = [
             f"MongoDB {version}  ·  host: {hostname}  ·  uptime: {uptime_hours}h",
@@ -279,11 +231,13 @@ class HealthCheckRunner:
             " from OS tools on macOS/APFS due to purgeable space and snapshots."
             " Reliable on Linux production servers.",
         ]
-        if disk_used_pct >= _THRESHOLDS["disk_used_pct_warning"]:
-            findings.append(
-                f"Filesystem disk at {disk_used_pct}% — "
-                f"{'CRITICAL: risk of mongod write failures.' if disk_used_pct >= _THRESHOLDS['disk_used_pct_critical'] else 'WARNING: monitor closely.'}"
-            )
+        if self._baseline.is_cold_start:
+            findings.append(f"Severity assessment: {self._baseline.cold_start_note()}")
+        if severity != HealthSeverity.OK:
+            label = ("CRITICAL: risk of mongod write failures."
+                     if severity == HealthSeverity.CRITICAL else "WARNING: monitor closely.")
+            note_str = f"  {disk_note}" if disk_note else ""
+            findings.append(f"Filesystem disk at {disk_used_pct}% — {label}{note_str}")
 
         return ReportSection(
             name="Server Health",
@@ -308,22 +262,14 @@ class HealthCheckRunner:
                              — these require replSetGetStatus which has no MCP equivalent.
         """
         # RS config
-        rs_config_docs = self._parse_json_docs(
-            self._mcp.call_tool("find", {"database": "local", "collection": "system.replset", "limit": 1})
-        )
+        rs_config_docs = self._mcp.find("local", "system.replset", limit=1)
         is_replica_set = bool(rs_config_docs)
         rs_name = rs_config_docs[0].get("_id", "unknown") if rs_config_docs else None
         members = rs_config_docs[0].get("members", []) if rs_config_docs else []
 
         # Oplog window
-        head_docs = self._parse_json_docs(
-            self._mcp.call_tool("find", {"database": "local", "collection": "oplog.rs",
-                                         "sort": {"ts": -1}, "limit": 1})
-        )
-        tail_docs = self._parse_json_docs(
-            self._mcp.call_tool("find", {"database": "local", "collection": "oplog.rs",
-                                         "sort": {"ts": 1}, "limit": 1})
-        )
+        head_docs = self._mcp.find("local", "oplog.rs", sort={"ts": -1}, limit=1)
+        tail_docs = self._mcp.find("local", "oplog.rs", sort={"ts": 1}, limit=1)
 
         def _ts_seconds(doc: Dict) -> Optional[int]:
             ts = doc.get("ts", {})
@@ -346,13 +292,16 @@ class HealthCheckRunner:
                 findings=["Standalone instance — replication not configured."],
             )
 
-        # Severity from oplog window
+        # BL-021: baseline-aware oplog severity (hard limit: < 2h always CRITICAL)
         severity = HealthSeverity.OK
+        _oplog_note = ""
         if oplog_window_hours is not None:
-            if oplog_window_hours < _THRESHOLDS["oplog_window_critical_hours"]:
-                severity = HealthSeverity.CRITICAL
-            elif oplog_window_hours < _THRESHOLDS["oplog_window_warning_hours"]:
-                severity = HealthSeverity.WARNING
+            severity, _oplog_note = self._baseline.assess(
+                "oplog_window_hours", oplog_window_hours,
+                static_warn=_THRESHOLDS["oplog_window_warning_hours"],
+                static_crit=_THRESHOLDS["oplog_window_critical_hours"],
+                higher_is_worse=False,
+            )
 
         findings: List[str] = []
         if is_replica_set:
@@ -367,8 +316,9 @@ class HealthCheckRunner:
                 "per-member replication lag — requires replSetGetStatus."
             )
         if oplog_window_hours is not None:
-            findings.append(f"Oplog window: {oplog_window_hours}h")
-            if oplog_window_hours < _THRESHOLDS["oplog_window_warning_hours"]:
+            note_str = f"  {_oplog_note}" if _oplog_note else ""
+            findings.append(f"Oplog window: {oplog_window_hours}h{note_str}")
+            if severity != HealthSeverity.OK:
                 findings.append(
                     f"Oplog window ({oplog_window_hours}h) is below the "
                     f"{_THRESHOLDS['oplog_window_warning_hours']}h minimum — "
@@ -397,9 +347,7 @@ class HealthCheckRunner:
         disk_used_pct = 0.0
 
         for db in user_dbs:
-            db_stats = self._parse_db_stats(
-                self._mcp.call_tool("db-stats", {"database": db})
-            ) or {}
+            db_stats = self._mcp.db_stats(db)
             total_data_mb  += db_stats.get("dataSize",  0) / 1_048_576
             total_index_mb += db_stats.get("indexSize", 0) / 1_048_576
             fs_used  = db_stats.get("fsUsedSize",  0)
@@ -407,18 +355,10 @@ class HealthCheckRunner:
             if fs_total:
                 disk_used_pct = round(fs_used / fs_total * 100, 1)
 
-            coll_blocks = self._mcp.call_tool("list-collections", {"database": db})
-            user_colls = [
-                c for c in self._parse_name_blocks(coll_blocks)
-                if not c.startswith("system.")
-            ]
+            user_colls = [c for c in self._mcp.list_collections(db) if not c.startswith("system.")]
             for coll in user_colls:
-                size_mb = self._parse_storage_size_mb(
-                    self._mcp.call_tool("collection-storage-size", {"database": db, "collection": coll})
-                )
-                doc_count = self._parse_count(
-                    self._mcp.call_tool("count", {"database": db, "collection": coll})
-                )
+                size_mb = self._mcp.collection_storage_size(db, coll)
+                doc_count = self._mcp.count(db, coll)
                 avg_bytes = round(size_mb * 1_048_576 / doc_count) if doc_count else 0
                 coll_stats.append({
                     "db": db, "collection": coll,
@@ -460,17 +400,12 @@ class HealthCheckRunner:
 
         slow_queries: List[Dict[str, Any]] = []
         for db in user_dbs:
-            blocks = self._mcp.call_tool("find", {
-                "database": db,
-                "collection": "system.profile",
-                "filter": {
-                    "millis": {"$gte": threshold},
-                    "op": {"$nin": ["getmore", "killCursors"]},
-                },
-                "sort": {"ts": -1},
-                "limit": limit,
-            })
-            for doc in self._parse_json_docs(blocks):
+            for doc in self._mcp.find(
+                db, "system.profile",
+                filter={"millis": {"$gte": threshold}, "op": {"$nin": ["getmore", "killCursors"]}},
+                sort={"ts": -1},
+                limit=limit,
+            ):
                 ns = doc.get("ns", "")
                 db_name, collection = ns.split(".", 1) if "." in ns else (db, ns)
                 cmd = doc.get("command", {}) if isinstance(doc.get("command"), dict) else {}
@@ -503,12 +438,23 @@ class HealthCheckRunner:
         sort_spill_count  = sum(1 for q in slow_queries if q["sort_spills"] > 0)
         total_spill_bytes = sum(q["sort_spill_bytes"] for q in slow_queries)
 
+        # BL-021: baseline-aware slow query severity
         if count == 0:
             severity = HealthSeverity.OK
-        elif count >= _THRESHOLDS["slow_query_count_critical"] or max_ms >= _THRESHOLDS["slow_query_ms_critical"]:
-            severity = HealthSeverity.CRITICAL
+            _count_note = ""
+            _ms_note = ""
         else:
-            severity = HealthSeverity.WARNING
+            count_sev, _count_note = self._baseline.assess(
+                "slow_query_count", count,
+                static_warn=_THRESHOLDS["slow_query_count_warning"],
+                static_crit=_THRESHOLDS["slow_query_count_critical"],
+            )
+            ms_sev, _ms_note = self._baseline.assess(
+                "max_execution_ms", float(max_ms),
+                static_warn=_THRESHOLDS["slow_query_ms_warning"],
+                static_crit=_THRESHOLDS["slow_query_ms_critical"],
+            )
+            severity = worst_severity([count_sev, ms_sev])
         # Sort spills are always at least WARNING — spilling to disk indicates memory pressure
         if sort_spill_count > 0:
             severity = worst_severity([severity, HealthSeverity.WARNING])
@@ -521,9 +467,11 @@ class HealthCheckRunner:
         if count == 0:
             findings.append(f"No slow queries above {threshold}ms — profiler is active.")
         else:
+            count_note_str = f"  {_count_note}" if _count_note else ""
+            ms_note_str    = f"  {_ms_note}"    if _ms_note    else ""
             findings.append(
-                f"{count} slow op(s)  ·  threshold: {threshold}ms  "
-                f"·  max: {max_ms}ms  ·  avg: {avg_ms:.0f}ms"
+                f"{count} slow op(s){count_note_str}  ·  threshold: {threshold}ms  "
+                f"·  max: {max_ms}ms{ms_note_str}  ·  avg: {avg_ms:.0f}ms"
             )
             findings.append(
                 f"{collscan_count} of {count} op(s) used COLLSCAN (no index)  "
@@ -586,13 +534,10 @@ class HealthCheckRunner:
             )
 
         # index_data keyed by "db.collection" for display
-        index_data: Dict[str, List[str]] = {}
+        index_data: Dict[str, List[Dict]] = {}
         for item in collections:
             db, coll = item["db"], item["collection"]
-            blocks = self._mcp.call_tool("collection-indexes", {
-                "database": db, "collection": coll,
-            })
-            index_data[f"{db}.{coll}"] = [b for b in blocks if b.startswith("Field:")]
+            index_data[f"{db}.{coll}"] = self._mcp.collection_indexes(db, coll)
 
         under_indexed = [fq for fq, idx in index_data.items() if len(idx) <= 1]
         ok_count = len(collections) - len(under_indexed)
@@ -632,19 +577,9 @@ class HealthCheckRunner:
         all_indexes: List[Dict[str, Any]] = []
 
         for db in user_dbs:
-            coll_blocks = self._mcp.call_tool("list-collections", {"database": db})
-            user_colls = [
-                c for c in self._parse_name_blocks(coll_blocks)
-                if not c.startswith("system.")
-            ]
+            user_colls = [c for c in self._mcp.list_collections(db) if not c.startswith("system.")]
             for coll in user_colls:
-                docs = self._parse_json_docs(
-                    self._mcp.call_tool("aggregate", {
-                        "database": db,
-                        "collection": coll,
-                        "pipeline": [{"$indexStats": {}}],
-                    })
-                )
+                docs = self._mcp.aggregate(db, coll, [{"$indexStats": {}}])
                 for doc in docs:
                     ops_raw = doc.get("accesses", {}).get("ops", 0)
                     ops = ops_raw.get("low", 0) if isinstance(ops_raw, dict) else int(ops_raw)
@@ -821,20 +756,28 @@ class HealthCheckRunner:
                    _THRESHOLDS["cache_hit_ratio_warning"] * 100),
             Signal("wt_pages_evicted",  pages_evict,   "pages (cumulative)"),
         ]
+        # BL-021: baseline-aware cache hit ratio severity
+        cache_hit_pct = round(hit_ratio * 100, 1)
+        cache_sev, cache_note = self._baseline.assess(
+            "cache_hit_ratio_pct", cache_hit_pct,
+            static_warn=_THRESHOLDS["cache_hit_ratio_warning"] * 100,
+            static_crit=_THRESHOLDS["cache_hit_ratio_critical"] * 100,
+            higher_is_worse=False,
+        )
+        severities.append(cache_sev)
+        cache_note_str = f"  {cache_note}" if cache_note else ""
         findings.append(
             f"WiredTiger cache: {cache_used_mb:,} MB used / {cache_max_mb:,} MB max  ·  "
-            f"hit ratio {hit_ratio * 100:.1f}%  ·  pages evicted {pages_evict:,}"
+            f"hit ratio {cache_hit_pct:.1f}%{cache_note_str}  ·  pages evicted {pages_evict:,}"
         )
-        if hit_ratio < _THRESHOLDS["cache_hit_ratio_critical"]:
-            severities.append(HealthSeverity.CRITICAL)
+        if cache_sev == HealthSeverity.CRITICAL:
             findings.append(
-                f"  Cache hit ratio is critically low ({hit_ratio * 100:.1f}%)  — "
+                f"  Cache hit ratio is critically low ({cache_hit_pct:.1f}%)  — "
                 f"data is being read from disk on most requests. Increase wiredTigerCacheSizeGB or reduce working set."
             )
-        elif hit_ratio < _THRESHOLDS["cache_hit_ratio_warning"]:
-            severities.append(HealthSeverity.WARNING)
+        elif cache_sev == HealthSeverity.WARNING:
             findings.append(
-                f"  Cache hit ratio ({hit_ratio * 100:.1f}%) is below the {_THRESHOLDS['cache_hit_ratio_warning'] * 100:.0f}% "
+                f"  Cache hit ratio ({cache_hit_pct:.1f}%) is below the {_THRESHOLDS['cache_hit_ratio_warning'] * 100:.0f}% "
                 f"warning threshold — consider increasing WiredTiger cache."
             )
 
@@ -844,17 +787,23 @@ class HealthCheckRunner:
         acquire_total = sum(locks.get("acquireCount",     {}).values())
         lock_wait_pct = round(acquire_wait / acquire_total * 100, 2) if acquire_total else 0.0
 
+        # BL-021: baseline-aware lock wait severity
+        lock_sev, lock_note = self._baseline.assess(
+            "lock_wait_pct", lock_wait_pct,
+            static_warn=_THRESHOLDS["lock_wait_pct_warning"],
+            static_crit=_THRESHOLDS["lock_wait_pct_critical"],
+        )
+        severities.append(lock_sev)
         signals.append(Signal("lock_wait_pct", lock_wait_pct, "%",
                                _THRESHOLDS["lock_wait_pct_warning"]))
-        findings.append(f"Global lock wait: {lock_wait_pct:.2f}% of acquisitions waited")
-        if lock_wait_pct >= _THRESHOLDS["lock_wait_pct_critical"]:
-            severities.append(HealthSeverity.CRITICAL)
+        lock_note_str = f"  {lock_note}" if lock_note else ""
+        findings.append(f"Global lock wait: {lock_wait_pct:.2f}% of acquisitions waited{lock_note_str}")
+        if lock_sev == HealthSeverity.CRITICAL:
             findings.append(
                 f"  Lock contention is critically high ({lock_wait_pct:.1f}%) — "
                 f"investigate long-running operations or high write concurrency."
             )
-        elif lock_wait_pct >= _THRESHOLDS["lock_wait_pct_warning"]:
-            severities.append(HealthSeverity.WARNING)
+        elif lock_sev == HealthSeverity.WARNING:
             findings.append(
                 f"  Lock wait percentage ({lock_wait_pct:.1f}%) exceeds warning threshold "
                 f"({_THRESHOLDS['lock_wait_pct_warning']}%) — watch for concurrency issues."
@@ -879,18 +828,24 @@ class HealthCheckRunner:
                    _THRESHOLDS["query_targeting_warning"]),
             Signal("cluster_scan_and_order",   scan_and_order, "in-memory sorts (cumulative)"),
         ]
+        # BL-021: baseline-aware targeting ratio severity
+        target_sev, target_note = self._baseline.assess(
+            "cluster_targeting_ratio", targeting_ratio,
+            static_warn=_THRESHOLDS["query_targeting_warning"],
+            static_crit=_THRESHOLDS["query_targeting_critical"],
+        )
+        severities.append(target_sev)
+        target_note_str = f"  {target_note}" if target_note else ""
         findings.append(
             f"Query targeting (cluster): scanned {total_scanned:,} keys/objects  ·  "
-            f"ratio {targeting_ratio:,.1f}× per read  ·  in-memory sorts {scan_and_order:,}"
+            f"ratio {targeting_ratio:,.1f}× per read{target_note_str}  ·  in-memory sorts {scan_and_order:,}"
         )
-        if targeting_ratio >= _THRESHOLDS["query_targeting_critical"]:
-            severities.append(HealthSeverity.CRITICAL)
+        if target_sev == HealthSeverity.CRITICAL:
             findings.append(
                 f"  Cluster targeting ratio is critically high ({targeting_ratio:,.0f}×) — "
                 f"many queries are doing full collection scans. Review index coverage."
             )
-        elif targeting_ratio >= _THRESHOLDS["query_targeting_warning"]:
-            severities.append(HealthSeverity.WARNING)
+        elif target_sev == HealthSeverity.WARNING:
             findings.append(
                 f"  Cluster targeting ratio ({targeting_ratio:,.1f}×) exceeds warning threshold "
                 f"({_THRESHOLDS['query_targeting_warning']}×) — check for missing or unused indexes."
