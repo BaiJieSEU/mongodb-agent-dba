@@ -236,11 +236,11 @@ def print_multi_report_summary(report) -> None:
     console.print(tbl)
     console.print()
 
-    html_path = report.report_path.replace(".json", ".html")
+    md_path = report.report_path.replace(".html", ".md")
     console.print(Panel(
         f"[bold green]Fleet report saved[/bold green]\n\n"
-        f"  HTML  →  {html_path}\n"
-        f"  JSON  →  {report.report_path}",
+        f"  HTML  →  {report.report_path}\n"
+        f"  MD    →  {md_path}",
         expand=False,
     ))
     console.print()
@@ -248,7 +248,6 @@ def print_multi_report_summary(report) -> None:
 
 def run_multi_cluster_health_check(config) -> None:
     """Run health checks across all configured clusters and produce a unified fleet report."""
-    import json
     import time
     from datetime import datetime
     from pathlib import Path
@@ -303,10 +302,6 @@ def run_multi_cluster_health_check(config) -> None:
     reports_dir.mkdir(exist_ok=True)
     stem = f"fleet_{timestamp.strftime('%Y-%m-%d_%H-%M-%S')}"
 
-    json_path = reports_dir / f"{stem}.json"
-    json_path.write_text(json.dumps(multi.to_dict(), indent=2, default=str))
-    logger.info("Fleet JSON report saved: %s", json_path)
-
     html_path = reports_dir / f"{stem}.html"
     html_path.write_text(render_multi_html(multi), encoding="utf-8")
     logger.info("Fleet HTML report saved: %s", html_path)
@@ -315,7 +310,7 @@ def run_multi_cluster_health_check(config) -> None:
     md_path.write_text(render_multi_markdown(multi), encoding="utf-8")
     logger.info("Fleet Markdown report saved: %s", md_path)
 
-    multi.report_path = str(json_path)
+    multi.report_path = str(html_path)
     print_multi_report_summary(multi)
 
 
