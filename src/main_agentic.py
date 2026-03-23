@@ -272,7 +272,7 @@ def run_multi_cluster_health_check(config) -> None:
     reports = []
     for cluster in clusters:
         console.print(f"  → [{cluster.name}] {cluster.uri}", style="dim")
-        runner = HealthCheckRunner(config, cluster_uri=cluster.uri, cluster_name=cluster.name)
+        runner = HealthCheckRunner(config, cluster_uri=cluster.uri, cluster_name=cluster.name, save_report=False)
         try:
             report = runner.run()
             reports.append(report)

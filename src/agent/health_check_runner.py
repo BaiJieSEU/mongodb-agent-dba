@@ -81,10 +81,12 @@ class HealthCheckRunner:
         config: AppConfig,
         cluster_uri: Optional[str] = None,
         cluster_name: str = "",
+        save_report: bool = True,
     ):
         self.config = config
         self._cluster_uri = cluster_uri or config.mongodb.monitored_cluster
         self._cluster_name = cluster_name
+        self._save_report_flag = save_report
         self._mcp: Optional[MCPClient] = None
         self._mongo: Optional[MongoDBManager] = None
 
@@ -158,8 +160,9 @@ class HealthCheckRunner:
         # BL-021: persist this run's metrics for future baseline comparisons
         self._baseline.record_from_report(report)
 
-        report.report_path = str(self._save_report(report))
-        self._purge_old_reports()
+        if self._save_report_flag:
+            report.report_path = str(self._save_report(report))
+            self._purge_old_reports()
         return report
 
     # ── Section 1: Cluster Overview ────────────────────────────────────────────
