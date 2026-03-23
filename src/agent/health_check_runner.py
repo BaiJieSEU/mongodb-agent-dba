@@ -705,16 +705,13 @@ class HealthCheckRunner:
             )
 
         # ── Page faults ─────────────────────────────────────────────────────────
+        # Cumulative since restart — any healthy server will have some.
+        # Shown as info only; severity driven by baseline deviation, not raw count.
         extra = ss.get("extra_info", {})
-        page_faults  = int(extra.get("page_faults", 0))
-        # Only surface page faults as a card when they've actually occurred
+        page_faults = int(extra.get("page_faults", 0))
         if page_faults > 0:
             signals.append(Signal("page_faults", page_faults, "faults (cumulative)"))
-            severities.append(HealthSeverity.WARNING)
-            findings.append(
-                f"Page faults: {page_faults:,} since restart — "
-                f"working set may exceed available RAM; consider increasing memory or reducing cache pressure."
-            )
+            findings.append(f"Page faults: {page_faults:,} since restart")
 
         # ── WiredTiger cache ────────────────────────────────────────────────────
         wt_cache = ss.get("wiredTiger", {}).get("cache", {})
