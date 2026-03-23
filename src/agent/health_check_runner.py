@@ -674,32 +674,24 @@ class HealthCheckRunner:
         signals: List[Signal] = []
         severities: List[HealthSeverity] = [HealthSeverity.OK]
 
-        # ── Throughput (opcounters) ─────────────────────────────────────────────
+        # ── Throughput (opcounters) — kept in findings only, not as cards ──────────
         opcounters = ss.get("opcounters", {})
         reads       = int(opcounters.get("query",   0))
         writes      = int(opcounters.get("insert",  0)) + int(opcounters.get("update", 0)) + int(opcounters.get("delete", 0))
         getmores    = int(opcounters.get("getmore", 0))
         commands    = int(opcounters.get("command", 0))
-        signals += [
-            Signal("total_reads",    reads,    "ops (cumulative)"),
-            Signal("total_writes",   writes,   "ops (cumulative)"),
-            Signal("total_getmores", getmores, "ops (cumulative)"),
-            Signal("total_commands", commands, "ops (cumulative)"),
-        ]
+        # Cumulative totals have no actionable threshold — surfaced as context, not cards
         findings.append(
-            f"Throughput (cumulative since restart): "
-            f"reads {reads:,}  writes {writes:,}  getmores {getmores:,}  commands {commands:,}"
+            f"Throughput since restart: reads {reads:,}  writes {writes:,}"
+            + (f"  getmores {getmores:,}" if getmores else "")
         )
 
         # ── Memory ─────────────────────────────────────────────────────────────
         mem = ss.get("mem", {})
         rss_mb  = int(mem.get("resident", 0))
-        virt_mb = int(mem.get("virtual",  0))
-        signals += [
-            Signal("memory_resident_mb", rss_mb,  "MB", _THRESHOLDS["memory_resident_warning_mb"]),
-            Signal("memory_virtual_mb",  virt_mb, "MB"),
-        ]
-        findings.append(f"Memory: resident {rss_mb:,} MB  ·  virtual {virt_mb:,} MB")
+        # virtual MB omitted — always large on 64-bit, never actionable
+        signals.append(Signal("memory_resident_mb", rss_mb, "MB", _THRESHOLDS["memory_resident_warning_mb"]))
+        findings.append(f"Memory: {rss_mb:,} MB resident RAM")
         if rss_mb >= _THRESHOLDS["memory_resident_critical_mb"]:
             severities.append(HealthSeverity.CRITICAL)
             findings.append(
@@ -712,36 +704,28 @@ class HealthCheckRunner:
                 f"  Resident memory ({rss_mb:,} MB) is elevated — monitor for growth."
             )
 
-        # ── CPU (user time) & page faults ───────────────────────────────────────
+        # ── Page faults ─────────────────────────────────────────────────────────
         extra = ss.get("extra_info", {})
-        page_faults  = int(extra.get("page_faults",   0))
-        user_time_us = int(extra.get("user_time_us",  0)) if "user_time_us" in extra else None
-        signals.append(Signal("page_faults", page_faults, "faults (cumulative)"))
-        if user_time_us is not None:
-            signals.append(Signal("cpu_user_time_sec", round(user_time_us / 1_000_000, 1), "sec (cumulative)"))
-            findings.append(
-                f"CPU: user time {user_time_us / 1_000_000:,.1f} sec (cumulative)  ·  page faults {page_faults:,}"
-            )
-        else:
-            findings.append(f"Page faults: {page_faults:,} (cumulative)")
-
+        page_faults  = int(extra.get("page_faults", 0))
+        # Only surface page faults as a card when they've actually occurred
         if page_faults > 0:
+            signals.append(Signal("page_faults", page_faults, "faults (cumulative)"))
             severities.append(HealthSeverity.WARNING)
             findings.append(
-                f"  Page faults detected ({page_faults:,} since restart) — "
+                f"Page faults: {page_faults:,} since restart — "
                 f"working set may exceed available RAM; consider increasing memory or reducing cache pressure."
             )
 
         # ── WiredTiger cache ────────────────────────────────────────────────────
         wt_cache = ss.get("wiredTiger", {}).get("cache", {})
-        cache_used  = wt_cache.get("bytes currently in the cache",     0)
-        cache_max   = wt_cache.get("maximum bytes configured",         0)
-        pages_read  = wt_cache.get("pages read into cache",            0)
-        pages_req   = wt_cache.get("pages requested from the cache",   0)
-        pages_evict = wt_cache.get("unmodified pages evicted",         0)
+        cache_used  = wt_cache.get("bytes currently in the cache",   0)
+        cache_max   = wt_cache.get("maximum bytes configured",       0)
+        pages_read  = wt_cache.get("pages read into cache",          0)
+        pages_req   = wt_cache.get("pages requested from the cache", 0)
 
         cache_used_mb = round(cache_used / (1024 ** 2), 1) if cache_used else 0
         cache_max_mb  = round(cache_max  / (1024 ** 2), 1) if cache_max  else 0
+        cache_util_pct = round(cache_used / cache_max * 100, 1) if cache_max else 0.0
 
         # Hit ratio: fraction of pages served from cache (vs read from disk)
         if pages_req > 0:
@@ -749,13 +733,6 @@ class HealthCheckRunner:
         else:
             hit_ratio = 1.0
 
-        signals += [
-            Signal("wt_cache_used_mb",  cache_used_mb, "MB"),
-            Signal("wt_cache_max_mb",   cache_max_mb,  "MB"),
-            Signal("wt_cache_hit_ratio", round(hit_ratio * 100, 1), "%",
-                   _THRESHOLDS["cache_hit_ratio_warning"] * 100),
-            Signal("wt_pages_evicted",  pages_evict,   "pages (cumulative)"),
-        ]
         # BL-021: baseline-aware cache hit ratio severity
         cache_hit_pct = round(hit_ratio * 100, 1)
         cache_sev, cache_note = self._baseline.assess(
@@ -765,14 +742,17 @@ class HealthCheckRunner:
             higher_is_worse=False,
         )
         severities.append(cache_sev)
+        # Single card: hit ratio (the metric that matters) + used/max as context in finding
+        signals.append(Signal("wt_cache_hit_ratio", cache_hit_pct, "%",
+                               _THRESHOLDS["cache_hit_ratio_warning"] * 100))
         cache_note_str = f"  {cache_note}" if cache_note else ""
         findings.append(
-            f"WiredTiger cache: {cache_used_mb:,} MB used / {cache_max_mb:,} MB max  ·  "
-            f"hit ratio {cache_hit_pct:.1f}%{cache_note_str}  ·  pages evicted {pages_evict:,}"
+            f"WiredTiger cache: {cache_hit_pct:.1f}% hit ratio{cache_note_str}"
+            f"  ·  {cache_used_mb} / {cache_max_mb} MB used ({cache_util_pct}%)"
         )
         if cache_sev == HealthSeverity.CRITICAL:
             findings.append(
-                f"  Cache hit ratio is critically low ({cache_hit_pct:.1f}%)  — "
+                f"  Cache hit ratio is critically low ({cache_hit_pct:.1f}%) — "
                 f"data is being read from disk on most requests. Increase wiredTigerCacheSizeGB or reduce working set."
             )
         elif cache_sev == HealthSeverity.WARNING:
@@ -821,13 +801,7 @@ class HealthCheckRunner:
         else:
             targeting_ratio = 0.0
 
-        signals += [
-            Signal("cluster_scanned_keys",    scanned,        "keys (cumulative)"),
-            Signal("cluster_scanned_objects",  scanned_obj,    "objects (cumulative)"),
-            Signal("cluster_targeting_ratio",  targeting_ratio, "keys+objs per read",
-                   _THRESHOLDS["query_targeting_warning"]),
-            Signal("cluster_scan_and_order",   scan_and_order, "in-memory sorts (cumulative)"),
-        ]
+        # Raw scanned key/object counts omitted as cards — the ratio is what matters
         # BL-021: baseline-aware targeting ratio severity
         target_sev, target_note = self._baseline.assess(
             "cluster_targeting_ratio", targeting_ratio,
@@ -835,10 +809,12 @@ class HealthCheckRunner:
             static_crit=_THRESHOLDS["query_targeting_critical"],
         )
         severities.append(target_sev)
+        signals.append(Signal("cluster_targeting_ratio", targeting_ratio, "docs scanned per read",
+                               _THRESHOLDS["query_targeting_warning"]))
         target_note_str = f"  {target_note}" if target_note else ""
         findings.append(
-            f"Query targeting (cluster): scanned {total_scanned:,} keys/objects  ·  "
-            f"ratio {targeting_ratio:,.1f}× per read{target_note_str}  ·  in-memory sorts {scan_and_order:,}"
+            f"Index efficiency (cluster): {targeting_ratio:,.1f}× docs scanned per read{target_note_str}"
+            + (f"  ·  {scan_and_order:,} in-memory sort(s)" if scan_and_order else "")
         )
         if target_sev == HealthSeverity.CRITICAL:
             findings.append(
