@@ -954,7 +954,7 @@ class HealthCheckRunner:
                 action=action,
                 evidence=(
                     f"{examined:,} docs examined, {returned} returned ({ms}ms) — "
-                    f"targeting ratio {examined / returned:.0f}× · COLLSCAN{sort_note}"
+                    f"targeting ratio {examined / returned:.0f}× · COLLSCAN{sort_note}" if returned else f"targeting ratio ∞× (0 docs returned) · COLLSCAN{sort_note}"
                 ),
                 confidence=confidence,
             ))

@@ -54,20 +54,41 @@ def build_llm(config: "AppConfig") -> "Runnable":
 
 # ── provider builders ──────────────────────────────────────────────────────────
 
-def _build_ollama(config: "AppConfig") -> "Runnable":
-    try:
-        from langchain_ollama import ChatOllama
-    except ImportError:
-        raise ImportError("langchain-ollama is required. Run: pip install langchain-ollama")
+class _OllamaNoThinkRunnable:
+    """Calls the Ollama /api/chat endpoint directly with think=false.
 
-    cfg = config.llm.ollama
-    llm = ChatOllama(
-        base_url=os.getenv("AGENT_OLLAMA_URL", cfg.base_url),
-        model=os.getenv("AGENT_OLLAMA_MODEL", cfg.model),
-        temperature=cfg.temperature,
-    )
-    logger.info("Ollama: %s  model=%s", cfg.base_url, cfg.model)
-    return llm | StrOutputParser()
+    langchain_ollama v1.0.1 does not forward a `think` parameter, so we bypass
+    it for the health-check enrichment path where latency matters.
+    """
+
+    def __init__(self, base_url: str, model: str, temperature: float) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._model    = model
+        self._temperature = temperature
+
+    def invoke(self, prompt: str) -> str:
+        import requests
+        resp = requests.post(
+            f"{self._base_url}/api/chat",
+            json={
+                "model":    self._model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream":   False,
+                "think":    False,
+                "options":  {"temperature": self._temperature},
+            },
+            timeout=120,
+        )
+        resp.raise_for_status()
+        return resp.json()["message"]["content"]
+
+
+def _build_ollama(config: "AppConfig") -> "Runnable":
+    cfg      = config.llm.ollama
+    base_url = os.getenv("AGENT_OLLAMA_URL",   cfg.base_url)
+    model    = os.getenv("AGENT_OLLAMA_MODEL",  cfg.model)
+    logger.info("Ollama: %s  model=%s", base_url, model)
+    return _OllamaNoThinkRunnable(base_url, model, cfg.temperature)
 
 
 def _build_anthropic(config: "AppConfig") -> "Runnable":

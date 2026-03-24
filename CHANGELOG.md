@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.6.0] — 2026-03-24
+
+### Summary
+Fixed a health check crash on zero-result full-scan queries and restored LLM enrichment
+for qwen3:8b by disabling its built-in thinking mode. LLM recommendations now consistently
+appear in every health check run.
+
+### Fixed
+- **`ZeroDivisionError` in `_build_recommendations`** — when a slow query returns 0
+  documents (e.g. a no-match full scan), `examined / returned` crashed. Evidence string
+  now shows `∞× (0 docs returned)` instead of raising.
+- **LLM enrichment always timing out** — `qwen3:8b` has thinking mode on by default,
+  generating a hidden `<think>…</think>` chain-of-thought block that consumed the entire
+  60 s budget. `langchain_ollama` v1.0.1 does not expose a `think` parameter, so
+  `_build_ollama()` in `llm_factory.py` now uses a direct `requests` call to the Ollama
+  `/api/chat` endpoint with `"think": false`. Response time dropped from >60 s (timeout)
+  to ~14 s; LLM enrichment now produces recommendations on every run.
+
+### Changed
+- `src/utils/llm_factory.py` — `_OllamaNoThinkRunnable` replaces `ChatOllama` for the
+  Ollama provider; calls `/api/chat` directly with `think: false` and implements the same
+  `invoke(prompt) -> str` interface expected by `LLMRecommender`.
+- `config/agent_config.yaml` — monitored cluster updated to `ecommerce`
+  (`mongodb://localhost:27018`); `local-rs1` and `local-rs2` entries removed.
+
+---
+
 ## [0.3.0] — 2026-03-17
 
 ### Summary

@@ -1,6 +1,11 @@
 mongodb:
   agent_store: "mongodb://localhost:27017"
-  monitored_cluster: "mongodb://localhost:27018"
+  monitored_cluster: "mongodb://localhost:27018"   # backward-compat; mirrors clusters[0]
+  monitored_clusters:
+    - name: "ecommerce"
+      uri: "mongodb://localhost:27018"
+      tags:
+        - development
 
 llm:
   # Active provider: ollama | anthropic | vertex_ai | bedrock | azure_openai

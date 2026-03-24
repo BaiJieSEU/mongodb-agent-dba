@@ -8,18 +8,17 @@
 Current version covers: cluster overview, server health, replication health, storage &
 capacity, query performance, missing indexes, unused indexes. Dynamically discovers all
 databases in the cluster — no hardcoded database names. JSON + HTML reports produced
-on every run. Next P0 items: scheduler (BL-011), baseline-aware severity (BL-021),
-typed tool output (BL-030).
+on every run. Next P0 items: scheduler (BL-011), baseline-aware severity (BL-021).
 See [REQUIREMENTS.md](REQUIREMENTS.md) and [BACKLOG.md](BACKLOG.md).
 
 ---
 
 ## Environment Setup
 
-### MongoDB Dual-Instance Setup
-- **Agent Memory Store**: Port 27017 (rs0) — stores agent investigations and memory
-- **Monitored Cluster**: Port 27018 (rs1) — target cluster under analysis
-- **MongoDB Version**: 8.0.4 Community Server
+### MongoDB Two-Instance Setup
+- **Agent Memory Store**: Port 27017 — stores agent investigations and memory
+- **Monitored Cluster** (`ecommerce`): Port 27018 — ecommerce database (5 collections, 220k docs)
+- **MongoDB Version**: 8.0.20 Community Server
 - **Installation**: `~/mongodb/`
 
 ### Configuration Files
@@ -148,7 +147,11 @@ only the MCP tool layer; it does not prevent a separate direct read-only admin c
 
 - Sync context manager; background thread + `asyncio.run()` (anyio compatibility)
 - One MCP subprocess per `investigate()` / `run()` call; `--readOnly` enforced
-- `call_tool(name, args) → list[str]` (text content blocks from MCP response)
+- `call_tool(name, args) → list[str]` — low-level raw text blocks
+- Typed tool methods (BL-030 ✅): `list_databases()`, `list_collections(db)`, `find(...)`,
+  `db_stats(db)`, `collection_storage_size(db, coll)`, `count(db, coll)`,
+  `aggregate(db, coll, pipeline)`, `collection_indexes(db, coll)`, `explain(...)`
+  — all parsing centralised here; callers receive Python-native types
 
 ---
 
@@ -169,7 +172,6 @@ only the MCP tool layer; it does not prevent a separate direct read-only admin c
 |---|---|---|
 | Scheduler | BL-011 (P0/L) | APScheduler or `schedule` lib; `--daemon` CLI flag |
 | Baseline-aware severity | BL-021 (P0/M) | Compare metrics to cluster's own history, not static thresholds |
-| Typed tool output | BL-030 (P0/L) | Replace string-parsing with dataclasses; LLM gets clean JSON |
 | Env var config (full) | BL-071 (P0/S, partial) | LLM + MongoDB vars done; schedule/threshold vars pending |
 
 ---
@@ -193,7 +195,7 @@ mongodb-agent-dba/
 │   │   ├── html_reporter.py              # Self-contained HTML report renderer (BL-060)
 │   │   ├── mcp_client.py                 # Sync wrapper around MongoDB MCP Server
 │   │   ├── mongodb_client.py             # Agent store connection (PyMongo)
-│   │   └── config_loader.py              # YAML config loader
+│   │   └── config_loader.py              # YAML config loader; ClusterConfig + multi-cluster support (BL-050)
 │   └── main_agentic.py                   # CLI entry point; routes to agentic or health check
 ├── config/
 │   └── agent_config.yaml                 # Runtime configuration
@@ -272,8 +274,8 @@ If `system.profile` is empty, ensure the profiler is enabled on the monitored cl
 ```bash
 # Start both MongoDB instances
 export PATH="$HOME/mongodb/bin:$PATH"
-mongod --config ~/mongodb/config/mongod.conf           # port 27017
-mongod --config ~/mongodb/config/mongod2.conf --fork   # port 27018
+mongod --config ~/mongodb/config/mongod.conf           # port 27017 (agent store)
+mongod --config ~/mongodb/config/mongod2.conf --fork   # port 27018 (ecommerce)
 
 # Run health check (produces JSON + HTML report)
 source venv/bin/activate && python src/main_agentic.py --health-check
@@ -305,7 +307,7 @@ source venv/bin/activate && python src/main_agentic.py "my database is slow"
 
 | Layer | Technology |
 |---|---|
-| LLM reasoning | `src/utils/llm_factory.py` — Ollama (default), Anthropic, GCP Vertex AI, AWS Bedrock, Azure OpenAI; provider set via `llm.provider` or `AGENT_LLM_PROVIDER` env var |
+| LLM reasoning | `src/utils/llm_factory.py` — Ollama (default), Anthropic, GCP Vertex AI, AWS Bedrock, Azure OpenAI; provider set via `llm.provider` or `AGENT_LLM_PROVIDER` env var. Ollama uses direct `/api/chat` call with `think: false` to disable qwen3 thinking mode. |
 | DB tool execution | `@mongodb-js/mongodb-mcp-server` (Node 18+), read-only |
 | MCP client | Python `mcp` SDK (`mcp[cli]>=1.0.0`) |
 | Agent memory store | PyMongo + MongoDB 8.0 (port 27017) |
