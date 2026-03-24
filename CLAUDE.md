@@ -26,6 +26,29 @@ See [REQUIREMENTS.md](REQUIREMENTS.md) and [BACKLOG.md](BACKLOG.md).
 - Monitored cluster: `~/mongodb/config/mongod2.conf`
 - Agent config: `config/agent_config.yaml`
 
+### Remote Cluster Connectivity
+
+The agent does not need to run on the same host as MongoDB. Two delivery patterns:
+
+**Approach A — SSH Tunnel (POC/demo, ~1 min)**
+Open a tunnel from the local machine to a MongoDB node via a bastion/jump host, then
+point `MONGO_MONITORED_URI` at `localhost:<tunnel-port>`. No software installed on the
+customer side. See README "Connecting to a Remote Cluster" for the full command.
+
+```bash
+ssh -L 27020:<mongo-internal-ip>:27017 <user>@<bastion> -N &
+export MONGO_MONITORED_URI="mongodb://localhost:27020/?replicaSet=<rs>&directConnection=true"
+source venv/bin/activate && python src/main_agentic.py --health-check
+```
+
+**Approach B — Docker on Customer VM (~10 min, persistent)**
+Clone repo on customer VM, create `.env` with `MONGO_MONITORED_URI` + LLM credentials
+(chmod 600, never committed), then `docker compose run`. Can be scheduled via cron.
+See README "Connecting to a Remote Cluster" for the full steps.
+
+**`MONGO_MONITORED_URI` env var** overrides `monitored_clusters[0].uri` in
+`agent_config.yaml` at startup — no config file edits needed on the customer side.
+
 ---
 
 ## Development Rules

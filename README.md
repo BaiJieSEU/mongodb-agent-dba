@@ -165,12 +165,33 @@ AGENT_AZURE_OPENAI_DEPLOYMENT=<your deployment name, e.g. gpt-4o>
 AGENT_MONGO_CLUSTER=mongodb+srv://user:pass@your-cluster.mongodb.net/
 ```
 
-**Multiple clusters** — add a comma-separated list to `.env`:
+**Multiple clusters (env var)** — add a comma-separated list to `.env`:
 ```
 AGENT_MONGO_CLUSTERS=mongodb+srv://cluster1.mongodb.net/,mongodb+srv://cluster2.mongodb.net/,mongodb+srv://cluster3.mongodb.net/
 ```
 
-When `AGENT_MONGO_CLUSTERS` is set, `run.sh` automatically runs the agent once per cluster. Each run produces a separate timestamped report in `reports/`.
+When `AGENT_MONGO_CLUSTERS` is set, cluster names are auto-derived from hostnames. `run.sh` iterates the list and runs the agent once per cluster; each run produces a separate timestamped report in `reports/`.
+
+**Multiple clusters (config file)** — register named clusters in `agent_config.yaml`:
+```yaml
+mongodb:
+  agent_store: "mongodb://localhost:27017"
+  monitored_clusters:
+    - name: "production"
+      uri: "mongodb+srv://user:pass@prod.mongodb.net/"
+      tags: [production]
+    - name: "staging"
+      uri: "mongodb+srv://user:pass@staging.mongodb.net/"
+      tags: [staging]
+```
+
+Then target a specific cluster by name:
+```bash
+./run.sh --cluster production --health-check
+./run.sh --cluster staging "why is my database slow"
+```
+
+Omitting `--cluster` defaults to the first entry in the list.
 
 ---
 
@@ -189,6 +210,95 @@ Then run the agent with any message:
 ```
 
 The script reads your `.env` to detect the LLM provider and runs the right Docker command automatically. When the agent finishes, it prints the report path to the terminal.
+
+## Connecting to a Remote Cluster
+
+The agent only needs **network access to MongoDB** — it does not need to run on the
+same host as the cluster. Two approaches cover most real-world scenarios:
+
+---
+
+### Approach A — SSH Tunnel (POC / demo, ~1 min setup)
+
+Best for: initial assessment, proof-of-concept, customer demo where no software is
+installed on the customer's server.
+
+```
+Your Laptop                        Customer Infrastructure
+─────────────────────────────      ──────────────────────────────────
+Agent runs here          ───────►  SSH bastion / jump host
+  MONGO_MONITORED_URI=             ───────►  MongoDB Replica Set
+  mongodb://localhost:27020/...              (internal network only)
+```
+
+**Step 1** — Open the tunnel (replace with your bastion host and MongoDB internal IP):
+```bash
+ssh -L 27020:<mongo-internal-ip>:27017 <user>@<bastion-host> -N &
+```
+
+**Step 2** — Point the agent at the tunnel:
+```bash
+export MONGO_MONITORED_URI="mongodb://localhost:27020/?replicaSet=<rsName>&directConnection=true"
+source venv/bin/activate && python src/main_agentic.py --health-check
+```
+
+No software installed on the customer side. Kill the tunnel when done:
+```bash
+kill %1
+```
+
+---
+
+### Approach B — Docker on Customer VM (persistent monitoring, ~10 min setup)
+
+Best for: leaving a persistent monitoring agent on the customer's infrastructure after
+the initial engagement, or any environment where Docker is available.
+
+```
+Customer VM (e.g. a monitoring host or jump box)
+─────────────────────────────────────────────────
+Docker container (agent + MCP server)
+  │
+  └──► MongoDB Replica Set (internal network)
+```
+
+**Step 1** — On the customer VM, create a credential file (never committed to git):
+```bash
+cat > .env << 'EOF'
+MONGO_MONITORED_URI=mongodb://<host1>:27017,<host2>:27017,<host3>:27017/?replicaSet=<rsName>
+AGENT_LLM_PROVIDER=anthropic          # or ollama, vertex_ai, bedrock, azure_openai
+AGENT_ANTHROPIC_API_KEY=<key>         # set for chosen provider
+EOF
+chmod 600 .env
+```
+
+**Step 2** — Pull and run:
+```bash
+git clone https://github.com/BaiJieSEU/mongodb-agent-dba
+cd mongodb-agent-dba
+docker compose build
+docker compose run --rm agent python src/main_agentic.py --health-check
+```
+
+Report is written to `reports/` on the host volume.
+
+**To leave a scheduled agent running:**
+```bash
+# Run health check every hour (add to crontab)
+0 * * * * cd /home/ubuntu/mongodb-agent-dba && \
+  docker compose run --rm agent python src/main_agentic.py --health-check
+```
+
+---
+
+### Comparison
+
+| Approach | Setup time | Customer installs | Best for |
+|---|---|---|---|
+| SSH tunnel | ~1 min | Nothing | POC, demo, one-off assessment |
+| Docker on VM | ~10 min | Docker only | Persistent monitoring, leave-behind |
+
+---
 
 ## Developing Locally (without Docker)
 
@@ -219,6 +329,15 @@ source venv/bin/activate
 python src/main_agentic.py --health-check
 open $(ls -t reports/*.html | head -1)
 
+# Target a specific named cluster (from monitored_clusters in config)
+python src/main_agentic.py --health-check --cluster production
+python src/main_agentic.py --cluster staging "my database is slow"
+
+# Fleet health check — all clusters at once (produces a single tabbed HTML report)
+# When more than one cluster is configured, --health-check without --cluster runs
+# all clusters and produces a unified fleet_*.json + fleet_*.html + fleet_*.md report.
+python src/main_agentic.py --health-check
+
 # Natural language investigation
 python src/main_agentic.py "my database is slow"
 python src/main_agentic.py "what indexes does the users collection have"
@@ -232,7 +351,8 @@ Copy `.env.example` to `.env` and set at minimum:
 | Variable | Required | Description |
 |---|---|---|
 | `AGENT_LLM_PROVIDER` | Yes | `ollama` \| `anthropic` \| `azure_openai` \| `bedrock` |
-| `AGENT_MONGO_CLUSTER` | For prod | URI of the monitored cluster |
+| `AGENT_MONGO_CLUSTER` | For prod | URI of the single monitored cluster |
+| `AGENT_MONGO_CLUSTERS` | For multi | Comma-separated URIs; names auto-derived from hostnames |
 | `AGENT_ANTHROPIC_API_KEY` | If anthropic | Anthropic API key |
 | `AGENT_AZURE_OPENAI_KEY` | If azure | Azure OpenAI key |
 | `AWS_ACCESS_KEY_ID` | If bedrock | AWS credentials |
@@ -241,8 +361,12 @@ Full `config/agent_config.yaml` schema:
 
 ```yaml
 mongodb:
-  agent_store: "mongodb://localhost:27017"       # agent memory
-  monitored_cluster: "mongodb://localhost:27018" # target cluster
+  agent_store: "mongodb://localhost:27017"        # agent memory
+  monitored_cluster: "mongodb://localhost:27018"  # backward-compat single cluster
+  monitored_clusters:                             # named cluster list (BL-050)
+    - name: "local-rs1"
+      uri: "mongodb://localhost:27018"
+      tags: [development]
 
 llm:
   provider: "ollama"   # override: AGENT_LLM_PROVIDER
