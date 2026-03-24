@@ -276,8 +276,15 @@ class HealthCheckRunner:
 
         def _ts_seconds(doc: Dict) -> Optional[int]:
             ts = doc.get("ts", {})
-            if isinstance(ts, dict) and "$timestamp" in ts:
-                return ts["$timestamp"]["t"]
+            if not isinstance(ts, dict) or "$timestamp" not in ts:
+                return None
+            inner = ts["$timestamp"]
+            # Extended JSON v2: {"$timestamp": {"t": <seconds>, "i": <ordinal>}}
+            if isinstance(inner, dict):
+                return inner.get("t")
+            # MCP packed form: {"$timestamp": "<uint64_string>"} — seconds in upper 32 bits
+            if isinstance(inner, (str, int)):
+                return int(inner) >> 32
             return None
 
         head_ts = _ts_seconds(head_docs[0]) if head_docs else None

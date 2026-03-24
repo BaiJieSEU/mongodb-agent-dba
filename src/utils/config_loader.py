@@ -3,13 +3,28 @@
 import os
 import yaml
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
+
+
+class ClusterConfig(BaseModel):
+    """A single monitored MongoDB cluster entry."""
+    name: str
+    uri: str
+    tags: List[str] = []
 
 
 class MongoDBConfig(BaseModel):
     agent_store: str
-    monitored_cluster: str
+    monitored_cluster: str = ""      # backward-compat; kept in sync with clusters[0]
+    monitored_clusters: List[ClusterConfig] = []
+
+    def get_cluster(self, name: str) -> Optional[ClusterConfig]:
+        """Return the ClusterConfig with the given name, or None."""
+        for c in self.monitored_clusters:
+            if c.name == name:
+                return c
+        return None
 
 
 class OllamaProviderConfig(BaseModel):
@@ -78,10 +93,31 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
     data = config.model_dump()
 
     # MongoDB URIs
-    if v := os.getenv("AGENT_MONGO_CLUSTER"):
+    # MONGO_MONITORED_URI / AGENT_MONGO_CLUSTER both override the single monitored cluster
+    if v := os.getenv("MONGO_MONITORED_URI") or os.getenv("AGENT_MONGO_CLUSTER"):
         data["mongodb"]["monitored_cluster"] = v
+        # Also replace clusters[0] so all code paths see the same URI
+        if data["mongodb"].get("monitored_clusters"):
+            data["mongodb"]["monitored_clusters"][0]["uri"] = v
+        else:
+            data["mongodb"]["monitored_clusters"] = [{"name": "remote", "uri": v, "tags": []}]
     if v := os.getenv("AGENT_MONGO_STORE"):
         data["mongodb"]["agent_store"] = v
+
+    # Multi-cluster: AGENT_MONGO_CLUSTERS=uri1,uri2,uri3 (overrides monitored_clusters list)
+    if v := os.getenv("AGENT_MONGO_CLUSTERS"):
+        from urllib.parse import urlparse
+        clusters = []
+        for uri in [u.strip() for u in v.split(",") if u.strip()]:
+            try:
+                host = urlparse(uri).hostname or uri
+                name = host.split(".")[0]
+            except Exception:
+                name = uri
+            clusters.append({"name": name, "uri": uri, "tags": []})
+        data["mongodb"]["monitored_clusters"] = clusters
+        if clusters:
+            data["mongodb"]["monitored_cluster"] = clusters[0]["uri"]
 
     # LLM provider selection
     if v := os.getenv("AGENT_LLM_PROVIDER"):
@@ -127,7 +163,23 @@ def load_config(config_path: str = None) -> AppConfig:
         }
 
     config = AppConfig(**data)
-    return _apply_env_overrides(config)
+    config = _apply_env_overrides(config)
+
+    # Synthesize monitored_clusters from monitored_cluster for backward-compat
+    if not config.mongodb.monitored_clusters and config.mongodb.monitored_cluster:
+        raw = config.model_dump()
+        raw["mongodb"]["monitored_clusters"] = [
+            {"name": "default", "uri": config.mongodb.monitored_cluster, "tags": []}
+        ]
+        config = AppConfig(**raw)
+
+    # Keep monitored_cluster in sync with the first cluster's URI
+    if config.mongodb.monitored_clusters and not config.mongodb.monitored_cluster:
+        raw = config.model_dump()
+        raw["mongodb"]["monitored_cluster"] = config.mongodb.monitored_clusters[0].uri
+        config = AppConfig(**raw)
+
+    return config
 
 
 def get_project_root() -> Path:
