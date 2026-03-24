@@ -90,6 +90,7 @@ _NAV_GROUPS: list[tuple[str, list[tuple[str, str, str | None]]]] = [
     ("Reliability", [
         ("Replication",              "sec-replication", "Replication Health"),
         ("Connections & concurrency","sec-connections", "Connections & Concurrency"),
+        ("Infrastructure",           "sec-infra",       "Infrastructure"),
         ("Storage",                  "sec-storage",     "Storage & Capacity"),
     ]),
     ("Action", [
