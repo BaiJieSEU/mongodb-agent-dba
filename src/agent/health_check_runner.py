@@ -68,6 +68,15 @@ _THRESHOLDS = {
     "query_targeting_critical": 100.0, # scanned-to-returned ratio > 100 → critical
     "memory_resident_warning_mb": 4096,   # RSS > 4 GB → warning (indicative)
     "memory_resident_critical_mb": 8192,  # RSS > 8 GB → critical (indicative)
+    # §9 Connections & Concurrency (BL-013)
+    "connections_warning": 500,
+    "tickets_warning": 10,
+    "lock_queue_warning": 10,
+    # §10 Infrastructure (BL-015)
+    "cpu_user_pct_warning": 80.0,
+    "cpu_iowait_pct_warning": 10.0,
+    "disk_write_latency_warning_ms": 10.0,
+    "system_memory_used_pct_warning": 90.0,
 }
 
 _SYSTEM_DBS = {"admin", "config", "local"}
@@ -111,6 +120,15 @@ class HealthCheckRunner:
         )
         self._baseline.load()
 
+        # OM client — optional; None if keys not configured or OM unreachable
+        self._om = None
+        om_cfg = self.config.ops_manager
+        if om_cfg.url and om_cfg.group_id and om_cfg.public_key and om_cfg.private_key:
+            from utils.om_client import OMClient
+            self._om = OMClient(
+                om_cfg.url, om_cfg.group_id, om_cfg.public_key, om_cfg.private_key
+            )
+
         try:
             with MCPClient(self._cluster_uri) as mcp:
                 self._mcp = mcp
@@ -134,6 +152,10 @@ class HealthCheckRunner:
 
             # §8 Operations — direct PyMongo serverStatus (BL-009)
             sections.append(self._section_operations())
+            # §9 Connections & Concurrency — OM API (BL-013)
+            sections.append(self._section_connections())
+            # §10 Infrastructure — OM API (BL-015)
+            sections.append(self._section_infrastructure())
         finally:
             self._mongo.close_connections()
             self._mongo = None
@@ -313,6 +335,24 @@ class HealthCheckRunner:
                 higher_is_worse=False,
             )
 
+        # Enrich with OM member states + per-secondary lag if available
+        om_host_map: Dict[str, Dict] = {}   # hostname → OM host doc
+        om_lag_map: Dict[str, Optional[float]] = {}  # hostname → lag seconds
+        if self._om is not None:
+            try:
+                for h in self._om.get_hosts():
+                    hn = h.get("hostname", "")
+                    if hn:
+                        om_host_map[hn] = h
+                for hn, h in om_host_map.items():
+                    if h.get("typeName", "").upper() == "REPLICA_SECONDARY":
+                        meas = self._om.get_host_measurements(
+                            h["id"], ["OPLOG_SLAVE_LAG_MASTER_TIME"]
+                        )
+                        om_lag_map[hn] = meas.get("OPLOG_SLAVE_LAG_MASTER_TIME")
+            except Exception as exc:
+                logger.warning("OM replication enrichment failed: %s", exc)
+
         findings: List[str] = []
         if is_replica_set:
             findings.append(f"Replica set: {rs_name}  ·  {len(members)} configured member(s)")
@@ -320,11 +360,18 @@ class HealthCheckRunner:
                 host = m.get("host", "?")
                 pri  = m.get("priority", "?")
                 hidden = "  [hidden]" if m.get("hidden") else ""
-                findings.append(f"  {host}  priority={pri}{hidden}")
-            findings.append(
-                "Not available via MCP: member health states (PRIMARY/SECONDARY/DOWN), "
-                "per-member replication lag — requires replSetGetStatus."
-            )
+                hn_only = host.split(":")[0]
+                om_host = om_host_map.get(hn_only, {})
+                type_name = om_host.get("typeName", "")
+                state_str = f"  [{type_name}]" if type_name else ""
+                lag = om_lag_map.get(hn_only)
+                lag_str = f"  lag {lag:.1f}s" if lag is not None else ""
+                findings.append(f"  {host}  priority={pri}{hidden}{state_str}{lag_str}")
+            if not om_host_map:
+                findings.append(
+                    "Member states not available — set OM_API_PUBLIC_KEY / OM_API_PRIVATE_KEY "
+                    "to see PRIMARY/SECONDARY/DOWN per member."
+                )
         if oplog_window_hours is not None:
             note_str = f"  {_oplog_note}" if _oplog_note else ""
             findings.append(f"Oplog window: {oplog_window_hours}h{note_str}")
@@ -840,6 +887,235 @@ class HealthCheckRunner:
             signals=signals,
             findings=findings,
         )
+
+    # ── Section 9: Connections & Concurrency (BL-013) — OM API ─────────────────
+
+    def _section_connections(self) -> ReportSection:
+        """§9 — connections, WiredTiger tickets, lock queue per RS member via OM."""
+        _SKIP = ReportSection(
+            name="Connections & Concurrency",
+            severity=HealthSeverity.OK,
+            signals=[],
+            findings=["Ops Manager not configured — set OM_URL and API keys to enable this section."],
+        )
+        if self._om is None:
+            return _SKIP
+        try:
+            hosts = self._om.get_hosts()
+            if not hosts:
+                return ReportSection(
+                    name="Connections & Concurrency",
+                    severity=HealthSeverity.OK,
+                    signals=[],
+                    findings=["Ops Manager returned no hosts for this group."],
+                )
+
+            METRICS = [
+                "CONNECTIONS", "TICKETS_AVAILABLE_READS",
+                "TICKETS_AVAILABLE_WRITE", "GLOBAL_LOCK_CURRENT_QUEUE_TOTAL",
+            ]
+            total_connections = 0
+            min_tickets_reads: Optional[float] = None
+            min_tickets_writes: Optional[float] = None
+            max_lock_queue = 0.0
+            member_lines: List[str] = []
+
+            for h in hosts:
+                meas = self._om.get_host_measurements(h["id"], METRICS)
+                c  = meas.get("CONNECTIONS")
+                tr = meas.get("TICKETS_AVAILABLE_READS")
+                tw = meas.get("TICKETS_AVAILABLE_WRITE")
+                lq = meas.get("GLOBAL_LOCK_CURRENT_QUEUE_TOTAL")
+                if c  is not None: total_connections += int(c)
+                if tr is not None: min_tickets_reads  = tr if min_tickets_reads  is None else min(min_tickets_reads,  tr)
+                if tw is not None: min_tickets_writes = tw if min_tickets_writes is None else min(min_tickets_writes, tw)
+                if lq is not None: max_lock_queue = max(max_lock_queue, lq)
+                type_label = h.get("typeName", "UNKNOWN")
+                conn_str   = f"{int(c)} conns" if c is not None else "conns n/a"
+                member_lines.append(f"  {h.get('hostname','?')}:{h.get('port','?')}  [{type_label}]  {conn_str}")
+
+            severities = [HealthSeverity.OK]
+            signals: List[Signal] = []
+            findings: List[str] = [f"Polled {len(hosts)} member(s):"] + member_lines
+
+            signals.append(Signal("total_connections", total_connections, "connections",
+                                   _THRESHOLDS["connections_warning"]))
+            findings.append(f"Total connections (all members): {total_connections:,}")
+            if total_connections > _THRESHOLDS["connections_warning"]:
+                severities.append(HealthSeverity.WARNING)
+                findings.append(
+                    f"  Connections ({total_connections:,}) exceed warning threshold "
+                    f"({_THRESHOLDS['connections_warning']:,})."
+                )
+
+            if min_tickets_reads is not None:
+                signals.append(Signal("tickets_reads", min_tickets_reads, "tickets",
+                                       _THRESHOLDS["tickets_warning"]))
+                findings.append(f"WiredTiger read tickets (most constrained member): {min_tickets_reads:.0f}")
+                if min_tickets_reads < _THRESHOLDS["tickets_warning"]:
+                    severities.append(HealthSeverity.WARNING)
+                    findings.append(f"  Read ticket exhaustion risk ({min_tickets_reads:.0f} remaining).")
+
+            if min_tickets_writes is not None:
+                signals.append(Signal("tickets_writes", min_tickets_writes, "tickets",
+                                       _THRESHOLDS["tickets_warning"]))
+                findings.append(f"WiredTiger write tickets (most constrained member): {min_tickets_writes:.0f}")
+                if min_tickets_writes < _THRESHOLDS["tickets_warning"]:
+                    severities.append(HealthSeverity.WARNING)
+                    findings.append(f"  Write ticket exhaustion risk ({min_tickets_writes:.0f} remaining).")
+
+            signals.append(Signal("lock_queue_total", max_lock_queue, "operations",
+                                   _THRESHOLDS["lock_queue_warning"]))
+            findings.append(f"Global lock queue depth (peak): {max_lock_queue:.0f}")
+            if max_lock_queue > _THRESHOLDS["lock_queue_warning"]:
+                severities.append(HealthSeverity.WARNING)
+                findings.append(
+                    f"  Lock queue depth ({max_lock_queue:.0f}) exceeds threshold — "
+                    f"investigate long-running operations."
+                )
+
+            return ReportSection(
+                name="Connections & Concurrency",
+                severity=worst_severity(severities),
+                signals=signals,
+                findings=findings,
+            )
+        except Exception as exc:
+            logger.warning("§9 connections section failed: %s", exc)
+            return ReportSection(
+                name="Connections & Concurrency",
+                severity=HealthSeverity.OK,
+                signals=[],
+                findings=[f"Ops Manager unreachable — section skipped ({exc})."],
+            )
+
+    # ── Section 10: Infrastructure (BL-015) — OM API ────────────────────────────
+
+    def _section_infrastructure(self) -> ReportSection:
+        """§10 — CPU, disk I/O, system memory per primary via OM."""
+        _SKIP = ReportSection(
+            name="Infrastructure",
+            severity=HealthSeverity.OK,
+            signals=[],
+            findings=["Ops Manager not configured — set OM_URL and API keys to enable this section."],
+        )
+        if self._om is None:
+            return _SKIP
+        try:
+            hosts = self._om.get_hosts()
+            if not hosts:
+                return ReportSection(
+                    name="Infrastructure",
+                    severity=HealthSeverity.OK,
+                    signals=[],
+                    findings=["Ops Manager returned no hosts for this group."],
+                )
+
+            primary = next(
+                (h for h in hosts if h.get("typeName", "").upper() == "REPLICA_PRIMARY"),
+                hosts[0],
+            )
+            secondaries = [h for h in hosts if h.get("id") != primary["id"]]
+
+            HOST_METRICS = [
+                "PROCESS_NORMALIZED_CPU_USER",
+                "SYSTEM_CPU_IOWAIT",
+                "SYSTEM_MEMORY_USED",
+                "SYSTEM_MEMORY_AVAILABLE",
+            ]
+            DISK_METRICS = [
+                "DISK_PARTITION_IOPS_WRITE",
+                "DISK_PARTITION_LATENCY_WRITE",
+            ]
+
+            severities = [HealthSeverity.OK]
+            signals: List[Signal] = []
+            sec_note = f"  ({len(secondaries)} secondary node(s))" if secondaries else ""
+            findings: List[str] = [
+                f"Primary: {primary.get('hostname','?')}:{primary.get('port','?')}{sec_note}"
+            ]
+
+            meas = self._om.get_host_measurements(primary["id"], HOST_METRICS)
+
+            cpu_user = meas.get("PROCESS_NORMALIZED_CPU_USER")
+            if cpu_user is not None:
+                cpu_user = round(cpu_user, 1)
+                signals.append(Signal("cpu_user_pct", cpu_user, "%",
+                                       _THRESHOLDS["cpu_user_pct_warning"]))
+                findings.append(f"MongoDB CPU user (primary, normalized): {cpu_user}%")
+                if cpu_user >= _THRESHOLDS["cpu_user_pct_warning"]:
+                    severities.append(HealthSeverity.WARNING)
+                    findings.append(
+                        f"  CPU user ({cpu_user}%) exceeds {_THRESHOLDS['cpu_user_pct_warning']}% — "
+                        f"check for expensive queries or background tasks."
+                    )
+
+            iowait = meas.get("SYSTEM_CPU_IOWAIT")
+            if iowait is not None:
+                iowait = round(iowait, 1)
+                signals.append(Signal("cpu_iowait_pct", iowait, "%",
+                                       _THRESHOLDS["cpu_iowait_pct_warning"]))
+                findings.append(f"System CPU iowait (primary): {iowait}%")
+                if iowait >= _THRESHOLDS["cpu_iowait_pct_warning"]:
+                    severities.append(HealthSeverity.WARNING)
+                    findings.append(
+                        f"  I/O wait ({iowait}%) above {_THRESHOLDS['cpu_iowait_pct_warning']}% — "
+                        f"disk subsystem may be a bottleneck."
+                    )
+
+            mem_used  = meas.get("SYSTEM_MEMORY_USED")
+            mem_avail = meas.get("SYSTEM_MEMORY_AVAILABLE")
+            if mem_used is not None and mem_avail is not None and (mem_used + mem_avail) > 0:
+                mem_used_pct = round(mem_used / (mem_used + mem_avail) * 100, 1)
+                signals.append(Signal("system_memory_used_pct", mem_used_pct, "%",
+                                       _THRESHOLDS["system_memory_used_pct_warning"]))
+                findings.append(f"System memory used (primary): {mem_used_pct}%")
+                if mem_used_pct >= _THRESHOLDS["system_memory_used_pct_warning"]:
+                    severities.append(HealthSeverity.WARNING)
+                    findings.append(
+                        f"  System memory usage ({mem_used_pct}%) above "
+                        f"{_THRESHOLDS['system_memory_used_pct_warning']}% — risk of OS swapping."
+                    )
+
+            partition = self._om.get_disk_name(primary["id"])
+            if partition:
+                disk_meas = self._om.get_disk_measurements(primary["id"], partition, DISK_METRICS)
+                iops_write = disk_meas.get("DISK_PARTITION_IOPS_WRITE")
+                if iops_write is not None:
+                    signals.append(Signal("disk_iops_write", round(iops_write, 1), "IOPS"))
+                    findings.append(
+                        f"Disk write IOPS (primary, partition {partition}): {iops_write:.1f}"
+                    )
+                lat_write = disk_meas.get("DISK_PARTITION_LATENCY_WRITE")
+                if lat_write is not None:
+                    lat_write = round(lat_write, 2)
+                    signals.append(Signal("disk_write_latency_ms", lat_write, "ms",
+                                           _THRESHOLDS["disk_write_latency_warning_ms"]))
+                    findings.append(f"Disk write latency (primary): {lat_write}ms")
+                    if lat_write >= _THRESHOLDS["disk_write_latency_warning_ms"]:
+                        severities.append(HealthSeverity.WARNING)
+                        findings.append(
+                            f"  Disk write latency ({lat_write}ms) above "
+                            f"{_THRESHOLDS['disk_write_latency_warning_ms']}ms — "
+                            f"investigate disk I/O saturation."
+                        )
+            else:
+                findings.append("Disk partition not discoverable via Ops Manager.")
+
+            return ReportSection(
+                name="Infrastructure",
+                severity=worst_severity(severities),
+                signals=signals,
+                findings=findings,
+            )
+        except Exception as exc:
+            logger.warning("§10 infrastructure section failed: %s", exc)
+            return ReportSection(
+                name="Infrastructure",
+                severity=HealthSeverity.OK,
+                signals=[],
+                findings=[f"Ops Manager unreachable — section skipped ({exc})."],
+            )
 
     # ── helpers ────────────────────────────────────────────────────────────────
 

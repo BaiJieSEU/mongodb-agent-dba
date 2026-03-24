@@ -1,5 +1,39 @@
 # Changelog
 
+## [0.7.0] — 2026-03-24
+
+### Summary
+Added Ops Manager API integration, closing BL-013 (connection pool) and BL-015
+(infrastructure metrics). Section 3 now shows real PRIMARY/SECONDARY state and
+per-secondary replication lag. Two new sections added to the health check pipeline.
+
+### Added
+- `src/utils/om_client.py` — `OMClient`: read-only HTTP Digest auth wrapper for the
+  OM Public API v1.0. Methods: `get_hosts()`, `get_host_measurements()`,
+  `get_disk_name()`, `get_disk_measurements()`. All methods fail silently so OM
+  being unreachable never blocks the health check.
+- **Section 9 — Connections & Concurrency** (BL-013): polls all RS members via OM for
+  `CONNECTIONS`, `TICKETS_AVAILABLE_READS/WRITE`, `GLOBAL_LOCK_CURRENT_QUEUE_TOTAL`.
+  Shows per-member breakdown; warns on ticket exhaustion (< 10 remaining).
+- **Section 10 — Infrastructure** (BL-015): pulls `PROCESS_NORMALIZED_CPU_USER`,
+  `SYSTEM_CPU_IOWAIT`, `SYSTEM_MEMORY_USED/AVAILABLE`, `DISK_PARTITION_IOPS_WRITE`,
+  and `DISK_PARTITION_LATENCY_WRITE` from the primary node via OM.
+- `OMConfig` Pydantic model in `config_loader.py`; env vars `OM_URL`, `OM_GROUP_ID`,
+  `OM_API_PUBLIC_KEY`, `OM_API_PRIVATE_KEY`. URL and group ID stored in
+  `agent_config.yaml`; credentials always from env only.
+
+### Changed
+- **Section 3 — Replication Health**: if OM is configured, each RS member now shows
+  `[REPLICA_PRIMARY]` / `[REPLICA_SECONDARY]` and per-secondary replication lag
+  (`OPLOG_SLAVE_LAG_MASTER_TIME`) sourced from OM. Falls back to "set OM keys"
+  message when OM is not configured.
+- `config/agent_config.yaml`: added `ops_manager` block (url + group_id; no keys).
+- `src/utils/html_reporter.py`: registered `Connections & Concurrency` and
+  `Infrastructure` sections in `_SECTION_META`, `_NAV_GROUPS`, and `_build_content`;
+  removed `_placeholder_section` call for BL-013.
+
+---
+
 ## [0.6.0] — 2026-03-24
 
 ### Summary

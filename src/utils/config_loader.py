@@ -58,6 +58,14 @@ class VertexAIProviderConfig(BaseModel):
     temperature: float = 0.1
 
 
+class OMConfig(BaseModel):
+    """Ops Manager API connection. Keys are env-only — never stored in YAML."""
+    url: str = ""
+    group_id: str = ""
+    public_key: str = ""   # OM_API_PUBLIC_KEY
+    private_key: str = ""  # OM_API_PRIVATE_KEY
+
+
 class LLMConfig(BaseModel):
     provider: str = "ollama"
     ollama: OllamaProviderConfig = OllamaProviderConfig()
@@ -86,6 +94,7 @@ class AppConfig(BaseModel):
     agent: AgentConfig
     demo: DemoConfig
     logging: Dict[str, Any]
+    ops_manager: OMConfig = OMConfig()
 
 
 def _apply_env_overrides(config: AppConfig) -> AppConfig:
@@ -138,6 +147,17 @@ def _apply_env_overrides(config: AppConfig) -> AppConfig:
     # Slow query threshold
     if v := os.getenv("AGENT_SLOW_QUERY_MS"):
         data["agent"]["slow_query_threshold_ms"] = int(v)
+
+    # Ops Manager
+    om = data.setdefault("ops_manager", {})
+    if v := os.getenv("OM_URL"):
+        om["url"] = v
+    if v := os.getenv("OM_GROUP_ID"):
+        om["group_id"] = v
+    if v := os.getenv("OM_API_PUBLIC_KEY"):
+        om["public_key"] = v
+    if v := os.getenv("OM_API_PRIVATE_KEY"):
+        om["private_key"] = v
 
     return AppConfig(**data)
 

@@ -64,14 +64,16 @@ _SECTION_BORDER = {
 # ── section routing ────────────────────────────────────────────────────────────
 
 _SECTION_META: dict[str, tuple[str, str]] = {
-    "Cluster Overview":   ("sec-overview",       "Cluster status"),
-    "Server Health":      ("sec-server",         "Server health"),
-    "Replication Health": ("sec-replication",    "Replication health"),
-    "Storage & Capacity": ("sec-storage",        "Storage"),
-    "Query Performance":  ("sec-queries",        "Slow query analysis"),
-    "Missing Indexes":    ("sec-indexes",        "Missing indexes"),
-    "Unused Indexes":     ("sec-indexes-unused", "Unused indexes"),
-    "Operations":         ("sec-ops",            "Operations"),
+    "Cluster Overview":          ("sec-overview",       "Cluster status"),
+    "Server Health":             ("sec-server",         "Server health"),
+    "Replication Health":        ("sec-replication",    "Replication health"),
+    "Storage & Capacity":        ("sec-storage",        "Storage"),
+    "Query Performance":         ("sec-queries",        "Slow query analysis"),
+    "Missing Indexes":           ("sec-indexes",        "Missing indexes"),
+    "Unused Indexes":            ("sec-indexes-unused", "Unused indexes"),
+    "Operations":                ("sec-ops",            "Operations"),
+    "Connections & Concurrency": ("sec-connections",    "Connections & concurrency"),
+    "Infrastructure":            ("sec-infra",          "Infrastructure"),
 }
 
 _NAV_GROUPS: list[tuple[str, list[tuple[str, str, str | None]]]] = [
@@ -86,9 +88,9 @@ _NAV_GROUPS: list[tuple[str, list[tuple[str, str, str | None]]]] = [
         ("Operations",      "sec-ops",         "Operations"),
     ]),
     ("Reliability", [
-        ("Replication",     "sec-replication", "Replication Health"),
-        ("Connections",     "sec-connections", None),
-        ("Storage",         "sec-storage",     "Storage & Capacity"),
+        ("Replication",              "sec-replication", "Replication Health"),
+        ("Connections & concurrency","sec-connections", "Connections & Concurrency"),
+        ("Storage",                  "sec-storage",     "Storage & Capacity"),
     ]),
     ("Action", [
         ("Recommendations", "recommendations", None),
@@ -846,8 +848,9 @@ def _build_content(report: HealthCheckReport) -> str:
         card("Missing Indexes"),
         card("Unused Indexes"),
         card("Operations"),
+        card("Connections & Concurrency"),
+        card("Infrastructure"),
         card("Replication Health"),
-        _placeholder_section("sec-connections", "Connections", _CONN_UNAVAILABLE, "BL-013"),
         card("Storage & Capacity"),
     ]
     return "\n<hr class=\"divider\">\n".join(b for b in blocks if b)

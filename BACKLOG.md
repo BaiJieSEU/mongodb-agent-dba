@@ -27,9 +27,9 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-030 | Structured tool output (typed) | P0 | L | 4 | ✅ Done |
 | BL-070 | Docker Compose deployment | P0 | L | 8 | ✅ Done |
 | BL-009 | Operations health section (serverStatus metrics) | P1 | M | 1 | ✅ Done |
-| BL-013 | Connection pool health section | P1 | M | 1 | 🔲 |
+| BL-013 | Connection pool health section | P1 | M | 1 | ✅ Done |
 | BL-014 | Scan & sort analysis in Query Performance | P1 | S | 1 | ✅ Done |
-| BL-015 | OS / infrastructure metrics (CPU, IOPS, disk queue) | P1 | L | 1 | 🔲 |
+| BL-015 | OS / infrastructure metrics (CPU, IOPS, disk queue) | P1 | L | 1 | ✅ Done |
 | BL-005 | Current operations tool | P1 | S | 1 | 🔲 |
 | BL-006 | Profiler configuration check | P1 | S | 1 | 🔲 |
 | BL-007 | Duplicate/redundant index detection | P1 | S | 1 | 🔲 |
