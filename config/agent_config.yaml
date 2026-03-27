@@ -1,11 +1,19 @@
 mongodb:
   agent_store: "mongodb://localhost:27017"
-  monitored_cluster: "mongodb://localhost:27018"   # backward-compat; mirrors clusters[0]
+  monitored_cluster: "mongodb://localhost:27020/?replicaSet=demoRS&directConnection=true"   # backward-compat; mirrors clusters[0]
   monitored_clusters:
-    - name: "ecommerce"
-      uri: "mongodb://localhost:27018"
+    - name: "ecommerce (demoRS)"
+      uri: "mongodb://localhost:27020/?replicaSet=demoRS&directConnection=true"
       tags:
-        - development
+        - gcp
+    - name: "analytics (analyticsRS)"
+      uri: "mongodb://localhost:27021/?replicaSet=analyticsRS&directConnection=true"
+      tags:
+        - gcp
+    - name: "crm (crmRS)"
+      uri: "mongodb://localhost:27022/?replicaSet=crmRS&directConnection=true"
+      tags:
+        - gcp
 
 llm:
   # Active provider: ollama | anthropic | vertex_ai | bedrock | azure_openai
@@ -47,6 +55,54 @@ agent:
   max_queries_to_analyze: 10
   investigation_timeout: 60
   llm_recommendations: true   # BL-034: enrich health check recommendations with LLM
+
+# Health check severity thresholds (BL-021).
+# Tune these to match your cluster's SLAs. Defaults reflect MongoDB best practices.
+thresholds:
+  # Query Performance
+  slow_query_pct_warning: 5.0        # slow queries > N% of profiled queries → warning
+  slow_query_pct_critical: 20.0      # slow queries > N% of profiled queries → critical
+  slow_query_ms_warning: 100         # query > Nms → warning
+  slow_query_ms_critical: 500        # query > Nms → critical
+
+  # Replication Health
+  oplog_window_warning_hours: 24     # oplog covers < Nh → warning
+  oplog_window_critical_hours: 4     # oplog covers < Nh → critical
+
+  # Storage & Capacity
+  disk_used_pct_warning: 80          # disk > N% → warning
+  disk_used_pct_critical: 90         # disk > N% → critical
+
+  # Operations — WiredTiger cache
+  cache_hit_ratio_warning: 0.95      # hit ratio < N → warning  (95%)
+  cache_hit_ratio_critical: 0.80     # hit ratio < N → critical (80%)
+
+  # Operations — lock contention
+  lock_wait_pct_warning: 5.0         # lock wait > N% → warning
+  lock_wait_pct_critical: 20.0       # lock wait > N% → critical
+
+  # Operations — query targeting (scanned-to-returned ratio)
+  query_targeting_warning: 10.0      # ratio > N → warning
+  query_targeting_critical: 100.0    # ratio > N → critical
+
+  # Operations — memory
+  memory_resident_warning_mb: 4096   # RSS > N MB → warning
+  memory_resident_critical_mb: 8192  # RSS > N MB → critical
+
+  # Connections & Concurrency
+  connections_warning: 500           # total connections > N → warning
+  tickets_warning: 10                # remaining WT tickets < N → warning
+  lock_queue_warning: 10             # queued lock waiters > N → warning
+
+  # Infrastructure
+  cpu_user_pct_warning: 80.0         # CPU user% > N → warning
+  cpu_iowait_pct_warning: 10.0       # iowait% > N → warning
+  disk_write_latency_warning_ms: 10.0 # write latency > Nms → warning
+  system_memory_used_pct_warning: 90.0 # system RAM used > N% → warning
+
+  # Index analysis (not severity — controls which queries are flagged)
+  full_scan_examined_min: 1000       # min docs examined to flag a COLLSCAN
+  full_scan_selectivity_max: 0.01    # max returned/examined ratio to flag (1%)
 
 ops_manager:
   url: "http://34.31.172.84:8080"

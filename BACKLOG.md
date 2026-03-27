@@ -31,8 +31,8 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-014 | Scan & sort analysis in Query Performance | P1 | S | 1 | ✅ Done |
 | BL-015 | OS / infrastructure metrics (CPU, IOPS, disk queue) | P1 | L | 1 | ✅ Done |
 | BL-005 | Current operations tool | P1 | S | 1 | 🔲 |
-| BL-006 | Profiler configuration check | P1 | S | 1 | 🔲 |
-| BL-007 | Duplicate/redundant index detection | P1 | S | 1 | 🔲 |
+| BL-006 | Profiler configuration check | P1 | S | 1 | ✅ Done |
+| BL-007 | Duplicate/redundant index detection | P1 | S | 1 | ✅ Done |
 | BL-023 | Confidence scoring on recommendations | P1 | S | 3 | ✅ Done |
 | BL-074 | PS delivery runbook (< 30 min) | P1 | S | 8 | 🔲 |
 | BL-078 | Fleet report — scalable cluster navigation | P1 | S | 7 | ✅ Done |
@@ -50,6 +50,19 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-033 | ESR index order validation | P2 | S | 4 | 🔲 |
 | BL-041 | Approval-gated profiler config | P2 | S | 5 | 🔲 |
 | BL-052 | Immutable audit trail | P2 | S | 6 | 🔲 |
+| BL-081 | HTML report — zero-duplication layout | P1 | S | 7 | ✅ Done |
+| BL-082 | HTML report — sidebar & content restructure | P1 | S | 7 | ✅ Done |
+| BL-083 | HTML report — collapsible Details panel per section | P1 | S | 7 | 🔲 |
+| BL-084 | Metric card tooltips with LLM-contextual explanation | P1 | M | 7 | ✅ Done |
+| BL-085 | Query Performance findings — structured readable layout | P1 | S | 7 | 🔲 |
+| BL-088 | Score & ticket tiering table in Markdown config | P1 | S | 3 | 🔲 |
+| BL-089 | Ticket priority driven by section consequence tier | P1 | S | 3 | 🔲 |
+| BL-090 | AI summary, score, and ticket priority alignment | P1 | S | 3 | 🔲 |
+| BL-091 | Fleet summary tab for multi-cluster reports | P1 | M | 7 | 🔲 |
+| BL-092 | Scoring system audit & simplification | P1 | M | 3 | ✅ Done |
+| BL-093 | Slow query threshold: count → % of total queries | P1 | M | 3 | 🔲 |
+| BL-086 | Metric tooltip context for non-breached signals (page faults, throughput) | P2 | S | 7 | 🔲 |
+| BL-087 | OM version and agent version in report header | P2 | S | 7 | ✅ Done |
 | BL-061 | Markdown report output | P2 | S | 7 | ✅ Done |
 | BL-075 | Data sovereignty mode | P2 | S | 8 | 🔲 |
 | BL-080 | Health rating formula — transparency in report | P2 | S | 7 | ✅ Done |
@@ -59,12 +72,12 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
 | BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
 
-**Done:** 22 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014, BL-009, BL-034, BL-070, BL-030, BL-050, BL-076, BL-078, BL-079, BL-080, BL-021)
+**Done:** 29 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014, BL-009, BL-034, BL-070, BL-030, BL-050, BL-076, BL-078, BL-079, BL-080, BL-021, BL-006, BL-007, BL-081, BL-082, BL-084, BL-085, BL-087, BL-092)
 **Partial:** 1 item (BL-071 — LLM+MongoDB env vars done, full coverage pending)
 **P0:** 1 remaining — scheduler (BL-011)
-**P1:** 20 items — high-value once P0 is in place
-**P2–P3:** 10 items — important but not blocking
-**Total:** 45 items across 8 epics (15 done, 2 partial, 28 remaining)
+**P1:** 30 items — high-value once P0 is in place (includes BL-088, BL-089, BL-090, BL-091, BL-093)
+**P2–P3:** 9 items — important but not blocking
+**Total:** 53 items across 8 epics (28 done, 1 partial, 24 remaining)
 
 ---
 
@@ -355,6 +368,10 @@ for each cluster and flags meaningful deviations.
   (baseline: 2, 3.5× above normal)"
 - The only human-configurable setting is the **alert filter** in `schedule.alert_on_severity`
   (notification threshold) — not the severity logic itself
+- **Threshold config (added):** all values in `_THRESHOLDS` dict moved to
+  `agent_config.yaml` under a `thresholds:` block so customers can tune them
+  to their SLAs without editing code. Code loads from config with the current
+  hard-coded values as defaults.
 
 ---
 
@@ -1044,6 +1061,456 @@ Query Performance → Missing Indexes → Unused Indexes. Each section produces
 Outputs machine-readable JSON + self-contained HTML to `reports/`. Section names:
 "Missing Indexes" (formerly "Index Health") and "Unused Indexes" (formerly "Index Usage").
 Note: storing the run in `agent_memory` is deferred to BL-012 (trend comparison).
+
+---
+
+### BL-088 · Score & ticket tiering table in Markdown config
+**Priority:** P1 | **Size:** S | **Epic:** 3
+
+**Problem:** The consequence-tier definitions (which section maps to which tier, what the penalty
+is, what the tier label is) are hard-coded across `html_reporter.py` and `llm_recommender.py`.
+The recommendation priority logic in `health_check_runner.py` is separate and not tier-aware.
+Any change to the tier model requires touching 2–3 files.
+
+**Solution:**
+- Create `config/scoring_tiers.md` — a human-readable Markdown table that documents the
+  tier model (section → tier, penalty by tier/severity, tier label, tier consequence).
+- The code continues to own the Python dicts (`SECTION_TIER`, `_TIER_PENALTY`, etc.) since
+  runtime parsing of Markdown is fragile; the `.md` file is the authoritative *documentation*
+  that developers and stakeholders can read and edit, with code kept in sync.
+- `config/scoring_tiers.md` serves as the canonical reference for BL-089 and BL-090.
+
+**Acceptance criteria:**
+- `config/scoring_tiers.md` exists with section→tier table, tier→penalty table, tier labels
+- Table matches `SECTION_TIER` and `_TIER_PENALTY` exactly (verified by inspection)
+
+---
+
+### BL-089 · Ticket priority driven by section consequence tier
+**Priority:** P1 | **Size:** S | **Epic:** 3
+
+**Problem:** Recommendation `priority` (high/medium/low) in `_build_recommendations()` is set
+ad hoc per rule — e.g. a missing-index recommendation is labeled `high` even though Missing
+Indexes is a P3 section (degrades performance but never causes data loss or outage). This means
+a "High priority" createIndex action competes visually with a genuinely critical oplog shrinkage
+warning.
+
+**Solution:**
+- Map recommendation priority from the section's consequence tier using `SECTION_TIER`:
+  - P0 sections (Server Health, Replication Health) → critical severity → `"high"`
+  - P1 sections (Storage, Operations) → critical `"high"`, warning `"medium"`
+  - P2 sections (Connections, Infrastructure) → critical `"medium"`, warning `"medium"`
+  - P3 sections (Query Performance, Missing Indexes) → `"medium"` for critical, `"low"` for warning
+  - P4 sections (Cluster Overview, Unused Indexes) → `"low"`
+- Apply this mapping in `_build_recommendations()` rather than hard-coding per rule.
+- Result: a missing-index action becomes `medium` or `low`; an oplog-window action becomes `high`.
+
+**Acceptance criteria:**
+- `db.orders.createIndex(...)` recommendation shows `medium` or `low` priority, not `high`
+- Oplog window / replication breach recommendations show `high`
+- Priority column in HTML report reflects tier-derived priority
+
+---
+
+### BL-090 · AI summary, score, and ticket priority alignment
+**Priority:** P1 | **Size:** S | **Epic:** 3
+
+**Problem:** Score, ticket priorities, and the LLM health summary are computed independently.
+A cluster can show score=70 (P1 breach), `high` priority on a P3 index issue, and an AI
+summary that doesn't mention the P1 breach — creating three inconsistent signals to the reader.
+
+**Solution:**
+- After BL-089 lands (tier-driven priorities), verify that AI summary leads with the same
+  highest-tier breached section that drives the biggest score penalty.
+- In `generate_health_summary()`, explicitly label which issues drove the score down:
+  "Score dropped from 100 to 45 due to: Replication Health CRITICAL (P0, −50 pts)".
+- Add a smoke-test assertion: if `overall_severity == CRITICAL` then the summary must
+  mention at least one P0 or P1 section breach, or fall back to a template string.
+
+**Acceptance criteria:**
+- AI summary mentions the same tier(s) that caused the largest score drop
+- No cluster shows `high`-priority P3 recommendations while the summary ignores a P0/P1 issue
+- Summary clearly states score and the top penalty contributor
+
+---
+
+### BL-091 · Fleet summary tab for multi-cluster reports
+**Priority:** P1 | **Size:** M | **Epic:** 7
+
+**Problem:** The fleet HTML report opens on the first cluster's detail view. With 3+ clusters,
+there is no at-a-glance overview showing all clusters side-by-side — the reader must tab
+through each one manually to understand the fleet's overall health.
+
+**Solution:**
+- Add a "Summary" tab as the first (default) tab in the fleet report.
+- Summary tab content:
+  - Fleet-wide headline: N clusters, M critical, K warnings, overall fleet score (average or min).
+  - One row per cluster: cluster name, score badge, overall severity dot, top issue (highest-tier
+    breached section), recommendation count, quick-link to that cluster's tab.
+  - Rows sorted by score ascending (worst first).
+- No new dependencies — pure HTML/CSS table, same styling as existing report.
+- Clicking a cluster row (or the "View →" link) switches to that cluster's tab via `switchCluster(idx)`.
+
+**Acceptance criteria:**
+- Summary tab is the default view when the fleet report opens
+- All clusters listed with score, severity, top issue
+- Clicking a cluster navigates to its detail tab
+- Single-cluster runs are unaffected (no summary tab shown)
+
+---
+
+### BL-092 · Scoring system audit & simplification
+**Priority:** P1 | **Size:** M | **Epic:** 3
+
+**Problem:** The scoring system has grown organically across BL-021, BL-080, BL-088–091 and
+now has three separate label namespaces that confuse each other:
+
+1. **Consequence tier** (P0–P4): section groupings that drive the score penalty (e.g. Replication = P0, Missing Indexes = P3).
+2. **Recommendation priority** (currently "High"/"Medium"/"Low" after the BL-089 rename): the urgency label shown in the Action Plan.
+3. **Backlog priority** (P0–P3 in this BACKLOG.md): story priority for development planning.
+
+The rename from "P0/P1/P2" to "High/Medium/Low" (applied in the previous session) removed the
+collision between (1) and (2), but the user's intent is: *if a finding causes an availability
+outage it should show P0 in the Action Plan*. That means recommendation priority labels should
+align with consequence tiers — i.e., reuse P0–P4 semantics, not an independent 3-level scale.
+
+**Questions to resolve:**
+- Should recommendation priority use P0–P4 (matching consequence tiers) or a separate scale?
+- Is the penalty table (P0 crit=−50, P1 crit=−40, …) still the right model?
+- Is one penalty-per-tier (worst section wins) simpler and clearer than per-section penalties?
+- Does the score formula communicate clearly to a non-expert user?
+- Are there any label mismatches left after BL-089 changes?
+
+**Deliverables:**
+- Revised `config/scoring_tiers.md` with the agreed canonical model
+- Unified recommendation priority label: derived from section consequence tier, shown consistently in HTML Action Plan, AI summary, and Markdown report
+- Update `_REC_LBL` in `html_reporter.py` and `_rec_priority()` in `health_check_runner.py` to match agreed convention
+- Verify AI summary references the same priority language as the Action Plan
+
+**Acceptance criteria:**
+- A finding in a P0-tier section (Replication/Server Health) shows "P0" in the Action Plan
+- A finding in a P3-tier section (Missing Indexes/Query Performance) shows "P3" in the Action Plan
+- Score breakdown, Action Plan labels, and AI summary all use the same tier vocabulary
+- `config/scoring_tiers.md` is the single source of truth — no magic numbers elsewhere
+- Existing health check test still produces a valid report
+
+---
+
+### BL-087 · OM version and agent version in report header
+**Priority:** P2 | **Size:** S | **Epic:** 7
+
+**Problem:** The report header shows cluster URI and run timestamp but not:
+- MongoDB Ops Manager version (relevant for customers running OM on-prem — version
+  determines which metrics API endpoints are available and whether the OM itself needs
+  upgrading)
+- Agent version (useful for support: "which version of the DBA agent generated this?")
+
+**Solution:**
+- Add `agent_version` to `HealthCheckReport` (populated from a `__version__` constant
+  in `main_agentic.py` or a `VERSION` file).
+- When OM is configured, call the OM `/api/public/v1.0/` root endpoint which returns
+  `{"version": "...", ...}` — store as `om_version` on the report.
+- Render both in the HTML report header row alongside cluster name and timestamp.
+
+---
+
+### BL-093 · Slow query threshold: count → % of total queries
+**Priority:** P1 | **Size:** M | **Epic:** 3
+
+**Problem:** `slow_query_count_warning: 5` and `slow_query_count_critical: 20` are absolute
+counts. This produces false positives on busy clusters (20 slow queries out of 10M is fine)
+and false negatives on quiet clusters (5 slow queries out of 10 is a 50% slow rate — serious).
+A percentage threshold scales with cluster load and gives consistent signal across fleet.
+
+**Design notes:**
+- Rename thresholds: `slow_query_pct_warning: 5.0`, `slow_query_pct_critical: 20.0` (% of reads)
+- Total query denominator: `opcounters.query` from serverStatus — already collected in §8 Operations
+- Time-window alignment challenge: `system.profile` count reflects the current profiler session
+  (may have been reset or enabled recently), while `opcounters.query` is cumulative since restart.
+  Both windows must be documented in the signal tooltip so the user understands what the ratio means.
+- Keep `slow_query_ms_warning` / `slow_query_ms_critical` (per-query latency thresholds) unchanged.
+- Keep the raw `slow_query_count` as an informational signal (no severity). The severity signal
+  becomes `slow_query_pct` with the percentage threshold.
+- If `opcounters.query == 0` (no reads since restart), omit the percentage signal.
+
+**Acceptance criteria:**
+- `slow_query_count` rendered as info-only (no threshold line)
+- `slow_query_pct` signal shows percentage and fires warning/critical per config
+- `config/agent_config.yaml` has `slow_query_pct_warning` / `slow_query_pct_critical`
+- `config/scoring_tiers.md` §3 updated to describe the new threshold semantics
+- Health check still runs correctly when profiler is disabled (no slow queries → 0%)
+
+---
+
+### BL-086 · Metric tooltip context for non-breached signals
+**Priority:** P2 | **Size:** S | **Epic:** 7
+
+**Problem:** BL-084 enriches tooltips for *breached* signals via LLM. Non-breached
+signals with no threshold (e.g. `page_faults`, throughput counters) only get a static
+definition — but the reader still can't tell if their specific value is good or bad.
+Example: "Page Faults: 1,817" with static tooltip "Cumulative count since last
+mongod restart..." doesn't answer "is 1,817 alarming?"
+
+**Solution:** Extend `enrich_signal_tooltips()` to also enrich a small set of
+threshold-less signals that always benefit from context:
+- `page_faults`: LLM compares to baseline if available; flags if high relative to uptime
+- `memory_resident_mb`: LLM comments if the value seems low relative to available RAM
+  (requires adding total system RAM as a signal or note)
+Include these signals in the LLM batch call regardless of breach status.
+
+---
+
+### BL-085 · Query Performance findings — structured readable layout
+**Priority:** P1 | **Size:** S | **Epic:** 7
+
+**Problem:** The Query Performance findings block is a dense text dump that is hard
+to scan. Example current output:
+```
+7 slow op(s) (baseline: 4.4) · threshold: 5ms · max: 19ms · avg: 9ms
+3 of 7 op(s) used COLLSCAN (no index) · 0 required in-memory sort stage
+  inventory [4 op(s) max 6ms avg 6ms]
+    plan: unknown · docs examined: 0 · keys examined: 0 · targeting ratio: 0×
+  order_items [2 op(s) max 19ms avg 18ms]
+    plan: COLLSCAN · docs examined: 150,000 · targeting ratio: ∞
+```
+Issues:
+- The summary line packs too much into one sentence — hard to scan
+- Per-collection detail is shown inline as indented text — not visually distinct
+- "plan: unknown · docs examined: 0" for inventory is confusing noise
+- The raw collection breakdown belongs in a collapsible Details panel (BL-083)
+
+**Solution:**
+- Summary line: keep key signals only — slow count vs baseline, COLLSCAN count, worst
+  collection. Everything else into Details.
+- Per-collection block: render as a small structured table or card in the Details panel
+  (once BL-083 is implemented), not inline text.
+- Suppress collections where `docs_examined == 0` and plan is unknown — these are
+  likely internal operations or profiler noise, not real slow queries.
+- Depends on: BL-083 (collapsible Details).
+
+---
+
+### BL-084 · Metric card tooltips with LLM-contextual explanation
+**Priority:** P1 | **Size:** M | **Epic:** 7
+
+**Problem:** Metric cards show a number and a unit — but readers who are not MongoDB
+experts cannot interpret them without external knowledge. For example:
+
+- "Cluster Targeting Ratio: 1,345.5 docs scanned per read" — what's bad about that?
+- "WT Cache Hit Ratio: 100.0%" — is that good or bad?
+- "Page Faults: 1,723 (cumulative)" — is 1,723 alarming?
+- "Lock Wait Pct: 0.0%" — what would a non-zero value mean?
+
+A customer reviewing the report with their manager, or a DBA new to MongoDB, needs
+context to act on these numbers. The industry standard pattern is an **ⓘ info icon**
+next to the metric label that reveals an explanation on hover (desktop) or tap (mobile).
+
+**Two-tier implementation:**
+
+**Tier 1 — Static tooltips (always available, no LLM required):**
+Add a `_METRIC_TOOLTIPS` dict in `html_reporter.py` mapping signal names to a short
+(1–2 sentence) definition of what the metric means and what the threshold represents.
+Rendered as a CSS-only tooltip — no JavaScript, works in offline/air-gapped reports.
+Example entries:
+```
+"cluster_targeting_ratio": "Docs examined ÷ docs returned across all queries. A ratio
+  above 10 means queries are scanning far more data than needed — usually a missing index.",
+"wt_cache_hit_ratio": "Percentage of reads served from WiredTiger's in-memory cache.
+  Below 95% means MongoDB is reading from disk, which significantly slows queries.",
+"page_faults": "Cumulative count since last mongod restart of data pages read from disk
+  because they were not in memory. The rate between runs matters more than the total.",
+"lock_wait_pct": "Percentage of time operations waited to acquire a global lock.
+  Above 5% indicates write contention or long-running operations blocking others.",
+"memory_resident_mb": "RAM currently used by the mongod process. In production this
+  should be close to total server RAM — MongoDB caches as much of the working set as possible.",
+```
+
+**Tier 2 — LLM-contextual interpretation (optional, enriches at report generation time):**
+When LLM enrichment is enabled (`llm_recommendations: true`), generate a one-sentence
+*contextual* interpretation for each breached or noteworthy signal — e.g.:
+> "Your targeting ratio of 1,345 is 134× above threshold — consistent with the full
+> collection scans on `ecommerce.order_items` identified in §6."
+
+Store these interpretations as a `tooltip` field on the `Signal` model. The HTML renderer
+shows the static tooltip for healthy signals and the LLM interpretation for breached ones.
+LLM generation is fire-and-forget per signal; failure falls back to static tooltip silently.
+
+**UI specification:**
+- Label row: `[metric name]  ⓘ`
+- The ⓘ is a `<span class="metric-info">` with `aria-label` and CSS `:hover` tooltip.
+- Tooltip box: max-width 280px, positioned above the card, dark surface background,
+  13px font, z-index above neighbouring cards.
+- On mobile (touch): tooltip visible on tap, dismissed on tap-outside.
+  Use a CSS `:focus-within` trick on a visually-hidden `<button>` — no JS required.
+
+**Data model change (`Signal`):**
+```python
+class Signal(BaseModel):
+    name: str
+    value: Any
+    unit: str | None = None
+    threshold: Any | None = None
+    tooltip: str | None = None   # static or LLM-generated explanation
+```
+
+**Acceptance criteria:**
+- Every signal in `_METRIC_TOOLTIPS` shows an ⓘ icon next to its label.
+- Hovering/tapping the ⓘ shows the tooltip without JavaScript.
+- Breached signals show LLM interpretation when available; static tooltip as fallback.
+- `Signal.tooltip` field is optional — existing code not broken by addition.
+- HTML output remains self-contained (no external CSS/JS dependencies).
+- End-to-end health check passes; tooltip content verified for all §8 Operations signals.
+
+---
+
+### BL-083 · HTML report — collapsible "Details" panel per section
+**Priority:** P1 | **Size:** S | **Epic:** 7
+
+**Problem:** Every section always shows its full findings list, even when the section is
+healthy and the findings carry no actionable signal. A reader scanning a 10-section
+report must scroll past walls of green-section bullets to reach the real issues.
+
+**Solution:** Wrap the findings list in a native HTML `<details><summary>Details
+</summary>…</details>` element — no JavaScript required.
+
+- Sections with severity WARNING or CRITICAL: `<details open>` (expanded by default —
+  the reader must see the issue).
+- Sections with severity OK: `<details>` (collapsed by default — reader can expand if
+  curious, but the clean scan path stays noise-free).
+- Summary label: use industry-standard wording — **"Show details"** / **"Hide details"**
+  (matches the pattern used by GitHub, Datadog, PagerDuty incident timelines).
+
+**Acceptance criteria:**
+- OK sections render collapsed; WARNING/CRITICAL sections render expanded.
+- Findings content is identical to current — only the visibility default changes.
+- No JavaScript added; native `<details>` toggle works in all modern browsers.
+- End-to-end health check passes; HTML output verified visually.
+
+---
+
+### BL-082 · HTML report — sidebar & content restructure
+**Priority:** P1 | **Size:** S | **Epic:** 7
+
+**Problem:** The current sidebar grouping was assembled incrementally and does not
+reflect how an experienced DBA thinks about a cluster health report. Specific issues
+identified in critical review:
+
+1. **"Alerts" misplaced under Overview.** Active alerts is a cross-cutting summary —
+   the first thing a reader wants to see. In standard DBA reports (MongoDB PS health
+   check templates, OpsManager dashboards, Datadog MongoDB integration), the alert
+   summary is always the top-of-report executive summary, not a sub-item under Overview.
+
+2. **"Index analysis" in Performance is wrong — and broken.** Index gaps and unused
+   indexes are *configuration findings / action items*, not performance metrics.
+   Performance = throughput, latency, scan ratios, cache efficiency. Index analysis
+   belongs in its own advisory group. Additionally, the current nav item "Index analysis"
+   jumps to `#sec-indexes` (Missing Indexes only) — Unused Indexes has **no nav link**
+   and is unreachable from the sidebar.
+
+3. **"Operations" under Performance is misleading.** serverStatus signals (resident
+   memory, page faults, lock wait %, WT cache hit ratio) are *resource health* metrics,
+   not query-performance metrics. A DBA expects these under "Cluster Health" or
+   "Resource Utilization". Mixing them with slow queries under one "Performance" group
+   creates a confusing category boundary.
+
+4. **"Storage" under Reliability is incorrect.** Storage capacity exhaustion is a
+   *capacity* concern, not a reliability concern. Reliability = HA, replication,
+   failover. Capacity = disk usage, memory pressure, connection limits.
+   A DBA looking for replication lag should not have to scan past storage metrics.
+
+5. **Content scroll order does not match nav group order.** Nav says Overview →
+   Performance → Reliability → Action, but content renders: Cluster, Server, Alerts,
+   Queries, Missing Indexes, Unused Indexes, Operations, Connections, Infrastructure,
+   Replication, Storage. A reader clicking a nav item and then scrolling gets confused
+   because adjacent sections belong to different nav groups.
+
+6. **"Server Health" hidden inside Overview nav group.** Server health (version, uptime,
+   disk) is infrastructure detail — it belongs in a Cluster Health group alongside
+   replication state, not paired with the summary overview.
+
+**Proposed structure** (based on standard MongoDB DBA health check practice):
+
+```
+Sidebar nav groups (top → bottom):
+┌─ Summary ──────────────────────────────────────────┐
+│  Cluster Overview                                  │
+│  Active Alerts                                     │
+├─ Availability ─────────────────────────────────────┤
+│  Replication Health                                │
+│  Connections & Concurrency                         │
+├─ Resource Health ───────────────────────────────────┤
+│  Server Health           (version, uptime, disk)  │
+│  Storage & Capacity                                │
+│  Infrastructure          (CPU, IOPS, memory — OM) │
+├─ Performance ───────────────────────────────────────┤
+│  Query Performance       (slow queries, scans)    │
+│  Operations              (cache, locks, memory)   │
+├─ Index Advisory ────────────────────────────────────┤
+│  Missing Indexes                                   │
+│  Unused Indexes                                    │
+└─ Action Plan ───────────────────────────────────────┘
+   Recommendations
+```
+
+Content scroll order must match nav group top-to-bottom order.
+
+**Rationale (DBA mental model):**
+- *"Is the cluster up and healthy right now?"* → Summary + Availability
+- *"Are we about to run out of resources?"* → Resource Health
+- *"Is it performing well?"* → Performance
+- *"What should we tune?"* → Index Advisory
+- *"What do I do next?"* → Action Plan
+
+**Acceptance criteria:**
+- Sidebar nav groups and content scroll order match the proposed structure exactly.
+- All 10 sections + Alerts + Recommendations have a visible nav link.
+- Unused Indexes has its own nav link (currently missing).
+- Active scroll-highlight (IntersectionObserver) continues to work correctly.
+- End-to-end health check passes; HTML output verified visually.
+
+---
+
+### BL-081 · HTML report — zero-duplication layout
+**Priority:** P1 | **Size:** S | **Epic:** 7
+
+**Problem:** Every section card renders the same data twice — once in metric cards and
+again as plain-text findings bullets. Examples:
+
+- §1 Cluster Overview: "Database Count: 1 / Collection Count: 5" in metric cards, then
+  "1 user database(s), 5 collection(s) total." + full collection name list as findings —
+  the count is already in the cards; the name list is noise unless a collection has a
+  problem.
+- §2 Server Health: version, uptime, disk GB, disk % in metric cards, then
+  "MongoDB 8.0.20 · host: rs-node-1 · uptime: 1.4h" + "Filesystem disk: 3.8 GB used of
+  19.2 GB (19.9%)" as findings — identical data, different format.
+- §9/§10 partially fixed in 0.7.1; the same pattern must be applied to all sections.
+
+Also, metric card labels are auto-generated from snake_case producing ugly strings:
+"Mongodb Version", "Filesystem Disk Used Gb", "Database Count" — §9/§10 fixed in
+0.7.1 via `_SIGNAL_LABELS`; §1 and §2 still need the same treatment.
+
+**Solution:**
+
+1. **Findings = alerts + non-redundant context only.** Remove any finding line whose
+   value is already shown in a metric card. Keep: threshold-breach warnings, host name
+   in §2 (not in any card), macOS/APFS disk note, partition name in §10. Rule: if the
+   reader can read the same number from a card, the finding line adds nothing.
+
+2. **Collection list — show only on problem.** In §1, omit the unconditional collection
+   name list. Add it back only when ≥1 collection has a finding in §5–§7, and phrase it
+   as a cross-reference: "ecommerce.orders — see Missing Indexes."
+
+3. **Extend `_SIGNAL_LABELS` to §1 and §2:**
+   - `database_count` → "Databases", `collection_count` → "Collections"
+   - `mongodb_version` → "Version", `uptime_hours` → "Uptime"
+   - `filesystem_disk_used_gb` → "Disk Used", `filesystem_disk_used_pct` → "Disk Used %"
+
+**Acceptance criteria:**
+- No finding line repeats a value already visible in a metric card for the same section.
+- §1 collection list only appears when ≥1 collection has a finding in §5–§7.
+- Metric card labels for §1 and §2 are human-friendly (no "Mongodb", no raw "Gb").
+- All 10 sections audited — no new duplication introduced.
+- End-to-end health check passes; HTML and JSON reports written without error.
 
 ---
 

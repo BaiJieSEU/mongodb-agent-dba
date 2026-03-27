@@ -23,6 +23,7 @@ class Investigation:
     tools_used: List[str]
     findings: Dict[str, Any]
     recommendations: List[Dict[str, Any]]
+    cluster_uri: str = ""   # which cluster this investigation was against
     recommendations_implemented: bool = False
     follow_up_needed: bool = False
     investigation_time_seconds: float = 0.0
@@ -40,7 +41,7 @@ class Investigation:
 @dataclass
 class PerformanceIssue:
     """Tracks specific performance issues over time"""
-    issue_id: str  # Hash of query + collection 
+    issue_id: str  # Hash of query + collection
     database: str
     collection: str
     query_pattern: str
@@ -50,6 +51,7 @@ class PerformanceIssue:
     detection_count: int
     avg_execution_time_ms: float
     recommended_action: str
+    cluster_uri: str = ""   # which cluster this issue was detected on
     action_implemented: bool = False
     severity: str = "medium"  # low, medium, high, critical
     expires_at: datetime = None

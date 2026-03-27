@@ -27,6 +27,7 @@ class Signal:
     value: Any
     unit: str = ""
     threshold: Optional[Any] = None
+    tooltip: Optional[str] = None   # static definition or LLM-contextual interpretation
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {"name": self.name, "value": self.value}
@@ -34,6 +35,8 @@ class Signal:
             d["unit"] = self.unit
         if self.threshold is not None:
             d["threshold"] = self.threshold
+        if self.tooltip:
+            d["tooltip"] = self.tooltip
         return d
 
 
@@ -57,7 +60,7 @@ class ReportSection:
 @dataclass
 class Recommendation:
     """One actionable recommendation produced by the health check."""
-    priority: str       # high | medium | low
+    priority: str       # P0–P4 (consequence tier of the section driving this recommendation)
     collection: str
     action: str         # exact MongoDB command or description
     evidence: str       # signals that drove this recommendation
@@ -82,14 +85,26 @@ class HealthCheckReport:
     overall_severity: HealthSeverity
     sections: List[ReportSection]
     recommendations: List[Recommendation]
+    cluster_name: str = ""      # human-readable name from monitored_clusters config
     report_path: str = ""       # filled in after save
+    agent_version: str = ""     # BL-087: version of this agent (from __version__)
+    om_version: str = ""        # BL-087: Ops Manager version (empty if OM not configured)
+    health_summary: str = ""    # LLM-generated natural language health summary
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        d = {
             "run_id": self.run_id,
             "timestamp": self.timestamp.isoformat() + "Z",
             "cluster_uri": self.cluster_uri,
+            "cluster_name": self.cluster_name,
             "overall_severity": self.overall_severity.value,
             "sections": [s.to_dict() for s in self.sections],
             "recommendations": [r.to_dict() for r in self.recommendations],
         }
+        if self.agent_version:
+            d["agent_version"] = self.agent_version
+        if self.om_version:
+            d["om_version"] = self.om_version
+        if self.health_summary:
+            d["health_summary"] = self.health_summary
+        return d

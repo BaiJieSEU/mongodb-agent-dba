@@ -1,5 +1,177 @@
 # Changelog
 
+## [0.7.7] — 2026-03-25
+
+### Summary
+Three new health check items: agent/OM version in report header (BL-087), profiler
+configuration check per database (BL-006), and redundant/duplicate index detection (BL-007).
+Also fixed the in-memory sort finding incorrectly appending the targeting-ratio baseline note.
+
+### Added
+- `src/main_agentic.py` — `__version__ = "0.7.7"` constant.
+- `src/models/health_check_report.py` — `agent_version` and `om_version` fields on
+  `HealthCheckReport`; serialised to JSON when set.
+- `src/utils/om_client.py` — `OMClient.get_version()`: hits `/api/public/v1.0/` root
+  endpoint and returns the OM version string; None on failure.
+- `src/agent/health_check_runner.py` — **BL-006**: `_section_query_performance()` now
+  calls `db.command({"profile": -1})` for each user database via direct PyMongo; adds
+  `profiler_disabled_dbs` and `profiler_high_slowms_dbs` signals + WARNING findings when
+  profiler is off or `slowms > 100`.
+- `src/agent/health_check_runner.py` — **BL-007**: `_section_index_usage()` detects
+  redundant indexes (exact duplicates + left-prefix redundancies) using the key patterns
+  already returned by `$indexStats`. Adds `redundant_indexes` signal and finding lines
+  naming the redundant index and the compound index that covers it.
+- `src/utils/html_reporter.py` — `_SIGNAL_LABELS` and `_METRIC_TOOLTIPS` entries for
+  `redundant_indexes`, `profiler_disabled_dbs`, `profiler_high_slowms_dbs`.
+- HTML report header now shows `Agent vX.Y.Z` (and `· OM <version>` when OM configured).
+
+### Fixed
+- `src/agent/health_check_runner.py` — in-memory sort count finding no longer appends the
+  targeting-ratio baseline note (e.g. `(baseline: 1187.7)`); the baseline note now appears
+  on its own line so the two findings are not conflated.
+
+---
+
+## [0.7.6] — 2026-03-25
+
+### Summary
+Fixed LLM recommendation quality (BL-034): recommendations no longer target healthy
+signals or use a breached signal as a springboard to speculate about unrelated metrics.
+
+### Fixed
+- `src/agent/llm_recommender.py` — added CRITICAL RULE #3 to system prompt: do not
+  recommend "investigate X" or "review X" where X has status="ok". Each action must
+  directly address the specific breached signal(s) cited as evidence.
+- LLM no longer generates "investigate lock wait %" when `lock_wait_pct=0` (ok), or
+  "review cache hit ratio" when `wt_cache_hit_ratio=100%` (ok), even when
+  `cluster_targeting_ratio` is breached in the same section.
+- Cross-section reasoning focus tightened: patterns require MULTIPLE status="breached"
+  signals, not one breached signal used to infer problems with healthy metrics.
+
+---
+
+## [0.7.5] — 2026-03-25
+
+### Summary
+Report polish: section group headers in the body, ⓘ coverage improvements, and
+removal of remaining duplicate findings in §4 Storage and §8 Operations.
+
+### Changed
+- `src/utils/html_reporter.py` — `_build_content()`: added visual group headers
+  ("Availability", "Resource Health", "Performance", "Index Advisory") between section
+  groups in the main content area, matching the sidebar nav structure.
+- `_METRIC_TOOLTIPS`: removed obvious ⓘ from `database_count` and `collection_count`;
+  added `collscan_count`, `sort_stage_count`, `sort_spill_count`, `max_execution_ms`;
+  updated `mongodb_version` tooltip with current MongoDB lifecycle info (7.0 LTS, 8.0 LTS).
+- `src/agent/health_check_runner.py` — `_section_storage_stats()`: removed
+  `collections_analysed` signal (duplicate of §1 collection count).
+- `_section_operations()`: removed findings lines that duplicated metric cards
+  (`Memory: X MB`, `Page faults: X`, `Global lock wait: X%`, `Index efficiency: X×`).
+  Kept: throughput since restart, WiredTiger cache used/max MB (not in any card),
+  in-memory sort count, and threshold-breach alert lines.
+
+### Added (backlog)
+- BL-085: Query Performance findings — structured readable layout (P1/S)
+- BL-086: Metric tooltip context for non-breached signals — page faults, throughput (P2/S)
+- BL-087: OM version and agent version in report header (P2/S)
+
+---
+
+## [0.7.4] — 2026-03-25
+
+### Summary
+Added ⓘ metric card tooltips with two-tier explanations: static definitions for all
+known signals, and LLM-generated contextual interpretations for breached signals (BL-084).
+
+### Added
+- `src/models/health_check_report.py` — `Signal.tooltip: Optional[str]` field; serialised
+  to JSON when set; used by HTML renderer to show LLM interpretation over static definition.
+- `src/utils/html_reporter.py` — `_METRIC_TOOLTIPS` dict: 25 static one-liner definitions
+  covering all signals in §1–§10. CSS-only ⓘ tooltip rendered on hover/focus — no
+  JavaScript, self-contained HTML. Blue border + arrow pointer; 260px wide overlay.
+- `src/agent/llm_recommender.py` — `LLMRecommender.enrich_signal_tooltips()`: collects
+  all breached signals across sections, sends a single batched LLM call asking for a
+  ≤25-word contextual interpretation per signal (citing the actual value), writes the
+  result back to `Signal.tooltip` in-place. 45 s timeout; fails silently to static tooltip.
+- `src/agent/health_check_runner.py` — `run()` now calls `enrich_signal_tooltips()` after
+  `enrich()`, reusing the same `LLMRecommender` instance.
+
+### Changed
+- `html_reporter.py` — `_metric_grid()`: renders ⓘ icon next to metric label when
+  `sig.tooltip` or `_METRIC_TOOLTIPS` entry exists. LLM tooltip takes precedence over
+  static definition for breached signals.
+
+---
+
+## [0.7.3] — 2026-03-25
+
+### Summary
+Eliminated duplicate data between metric cards and findings across all sections (BL-081).
+Extended signal label polish to §1 and §2.
+
+### Changed
+- `src/agent/health_check_runner.py` — `_section_cluster_overview()`: removed the
+  redundant "N user database(s), M collection(s) total" line (duplicated metric cards)
+  and the full per-database collection name list. Replaced with a single contextual line
+  showing database names and collection counts — information not present in the cards.
+- `_section_server_health()`: removed "MongoDB X.Y.Z · host · uptime" and
+  "Filesystem disk: X GB used of Y GB (Z%)" findings — all values already in metric
+  cards. Kept: host name (not in any card), APFS/fsUsedSize note, baseline cold-start
+  note, threshold-breach alert line.
+- `src/utils/html_reporter.py` — `_SIGNAL_LABELS`: extended to cover §1 and §2 signals:
+  `database_count` → "Databases", `collection_count` → "Collections",
+  `mongodb_version` → "Version", `uptime_hours` → "Uptime",
+  `filesystem_disk_used_gb` → "Disk Used", `filesystem_disk_used_pct` → "Disk Used %".
+
+---
+
+## [0.7.2] — 2026-03-25
+
+### Summary
+Restructured HTML report sidebar navigation and content scroll order to match a
+standard MongoDB DBA mental model (BL-082). Fixed missing Unused Indexes nav link.
+
+### Changed
+- `src/utils/html_reporter.py` — `_NAV_GROUPS`: replaced 4 groups (Overview,
+  Performance, Reliability, Action) with 6 semantically correct groups:
+  **Summary** (Cluster overview, Active alerts),
+  **Availability** (Replication, Connections & concurrency),
+  **Resource Health** (Server health, Storage, Infrastructure),
+  **Performance** (Query performance, Operations),
+  **Index Advisory** (Missing indexes, Unused indexes),
+  **Action Plan** (Recommendations).
+- `_build_content()`: content scroll order updated to match nav group top-to-bottom
+  order so scrolling and clicking stay in sync.
+- `_dot()`: removed stale `sec-indexes` combined-severity workaround; both index
+  sections now resolve directly via their own `section_name` lookup.
+- **Fixed**: Unused Indexes had no sidebar nav link — now has its own entry under
+  Index Advisory.
+- "Alerts" nav label renamed to "Active alerts" for clarity.
+
+---
+
+## [0.7.1] — 2026-03-24
+
+### Summary
+Improved HTML report readability for §9 Connections & Concurrency and §10 Infrastructure:
+metric card labels are now human-friendly, and redundant findings text that duplicated
+metric card values has been removed.
+
+### Changed
+- `src/utils/html_reporter.py`: added `_SIGNAL_LABELS` dict mapping signal names to
+  display-friendly labels (e.g. `cpu_user_pct` → "CPU User %", `disk_iops_write` →
+  "Disk Write IOPS", `total_connections` → "Connections"). Falls back to
+  `.replace("_", " ").title()` for unlisted signals.
+- `src/agent/health_check_runner.py` — `_section_infrastructure()`: removed findings
+  lines that duplicated metric card values (CPU user %, I/O wait %, memory used %,
+  disk write IOPS, disk write latency). Kept: primary hostname, disk partition name,
+  and threshold-breach warning lines.
+- `src/agent/health_check_runner.py` — `_section_connections()`: removed findings
+  lines that duplicated metric card values (total connections, read/write ticket counts,
+  lock queue depth). Kept: per-member breakdown table and threshold-breach warnings.
+
+---
+
 ## [0.7.0] — 2026-03-24
 
 ### Summary

@@ -52,8 +52,8 @@ _STATUS_COLOR = {
     HealthSeverity.WARNING:  "c-amber",
     HealthSeverity.CRITICAL: "c-red",
 }
-_REC_PRI = {"high": "rp0", "medium": "rp1", "low": "rp2"}
-_REC_LBL = {"high": "P0",  "medium": "P1",  "low": "P2"}
+_REC_PRI = {"P0": "rp0", "P1": "rp1", "P2": "rp2", "P3": "rp3", "P4": "rp4"}
+_REC_LBL = {"P0": "P0",  "P1": "P1",  "P2": "P2",  "P3": "P3",  "P4": "P4"}
 _SECTION_BORDER = {
     HealthSeverity.OK:       "",
     HealthSeverity.WARNING:  "s-warn",
@@ -77,24 +77,29 @@ _SECTION_META: dict[str, tuple[str, str]] = {
 }
 
 _NAV_GROUPS: list[tuple[str, list[tuple[str, str, str | None]]]] = [
-    ("Overview", [
-        ("Cluster status",  "sec-overview",    "Cluster Overview"),
-        ("Server health",   "sec-server",      "Server Health"),
-        ("Alerts",          "alerts",          None),
+    ("Action Plan", [
+        ("Recommendations", "recommendations", None),
+    ]),
+    ("Summary", [
+        ("Cluster overview", "sec-overview", "Cluster Overview"),
+        ("Active alerts",    "alerts",       None),
+    ]),
+    ("Availability", [
+        ("Replication",               "sec-replication", "Replication Health"),
+        ("Connections & concurrency", "sec-connections", "Connections & Concurrency"),
+    ]),
+    ("Resource Health", [
+        ("Server health",  "sec-server",  "Server Health"),
+        ("Storage",        "sec-storage", "Storage & Capacity"),
+        ("Infrastructure", "sec-infra",   "Infrastructure"),
     ]),
     ("Performance", [
-        ("Slow queries",    "sec-queries",     "Query Performance"),
-        ("Index analysis",  "sec-indexes",     None),
-        ("Operations",      "sec-ops",         "Operations"),
+        ("Query performance", "sec-queries", "Query Performance"),
+        ("Operations",        "sec-ops",     "Operations"),
     ]),
-    ("Reliability", [
-        ("Replication",              "sec-replication", "Replication Health"),
-        ("Connections & concurrency","sec-connections", "Connections & Concurrency"),
-        ("Infrastructure",           "sec-infra",       "Infrastructure"),
-        ("Storage",                  "sec-storage",     "Storage & Capacity"),
-    ]),
-    ("Action", [
-        ("Recommendations", "recommendations", None),
+    ("Index Advisory", [
+        ("Missing indexes", "sec-indexes",        "Missing Indexes"),
+        ("Unused indexes",  "sec-indexes-unused", "Unused Indexes"),
     ]),
 ]
 
@@ -285,6 +290,20 @@ body {
 
 .divider { border: none; border-top: 1px solid var(--border); margin: 28px 0; }
 
+/* ── Content group header ── */
+.content-group {
+  display: flex; align-items: center; gap: 12px;
+  margin: 36px 0 20px;
+}
+.content-group-label {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--t3);
+  white-space: nowrap;
+}
+.content-group-rule {
+  flex: 1; height: 1px; background: var(--border);
+}
+
 /* ── Alert — left-border accent ── */
 .alert {
   border-radius: 6px; padding: 12px 16px;
@@ -325,11 +344,45 @@ code { font-family: var(--mono); font-size: 12px; color: var(--t2); }
 }
 .metric.m-crit { border-color: var(--red-border);   background: var(--red-bg); }
 .metric.m-warn { border-color: var(--amber-border); background: var(--amber-bg); }
-.metric-lbl { font-size: 12px; color: var(--t2); margin-bottom: 6px; letter-spacing: 0.01em; }
+.metric-lbl { font-size: 12px; color: var(--t2); margin-bottom: 6px; letter-spacing: 0.01em; display: flex; align-items: center; gap: 4px; }
 .metric-val { font-size: 20px; font-weight: 600; font-family: var(--mono); margin-bottom: 2px; line-height: 1.1; }
 .metric-sub { font-size: 12px; color: var(--t3); }
 .metric-sub:empty { display: none; }
 .metric-limit { font-size: 12px; color: var(--t3); margin-top: 4px; border-top: 1px solid var(--border); padding-top: 4px; }
+
+/* ── Metric tooltip ── */
+.minfo { position: relative; display: inline-flex; align-items: center; cursor: default; }
+.minfo-icon {
+  font-size: 11px; color: var(--t3); line-height: 1;
+  border: 1px solid var(--border); border-radius: 50%;
+  width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center;
+  flex-shrink: 0; user-select: none;
+  transition: color 0.15s, border-color 0.15s;
+}
+.minfo:hover .minfo-icon, .minfo:focus-within .minfo-icon {
+  color: var(--blue); border-color: var(--blue);
+}
+.minfo-tip {
+  visibility: hidden; opacity: 0;
+  position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%);
+  background: #1e2a3a; border: 1px solid var(--blue-border);
+  color: var(--t1); font-size: 12px; line-height: 1.5;
+  padding: 8px 12px; border-radius: 6px;
+  width: 260px; white-space: normal; z-index: 100;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+.minfo-tip::after {
+  content: ""; position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  border: 5px solid transparent; border-top-color: var(--blue-border);
+}
+.minfo:hover .minfo-tip, .minfo:focus-within .minfo-tip {
+  visibility: visible; opacity: 1;
+}
+/* Mobile tap: toggle via hidden checkbox trick */
+.minfo-chk { position: absolute; opacity: 0; width: 0; height: 0; }
+.minfo-chk:checked ~ .minfo-tip { visibility: visible; opacity: 1; }
 
 /* ── Placeholder ── */
 .placeholder {
@@ -357,7 +410,9 @@ code { font-family: var(--mono); font-size: 12px; color: var(--t2); }
 }
 .rp0 { background: var(--red-bg);   color: var(--red);   border: 1px solid var(--red-border); }
 .rp1 { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
-.rp2 { background: var(--surface2); color: var(--t3);   border: 1px solid var(--border); }
+.rp2 { background: var(--blue-bg);  color: var(--blue);  border: 1px solid var(--blue-border); }
+.rp3 { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+.rp4 { background: var(--surface2); color: var(--t3);   border: 1px solid var(--border); }
 .rec-body  { font-size: 13px; color: var(--t2); line-height: 1.6; flex: 1; min-width: 0; }
 .rec-collection { font-size: 14px; font-weight: 600; color: var(--t1); margin-bottom: 6px; }
 .rec-action {
@@ -378,7 +433,54 @@ code { font-family: var(--mono); font-size: 12px; color: var(--t2); }
   padding: 2px 6px; border-radius: 3px;
   background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border);
 }
+.badge-rule {
+  font-size: 11px; font-family: var(--mono); font-weight: 600;
+  padding: 2px 6px; border-radius: 3px;
+  background: var(--surface2); color: var(--t3); border: 1px solid var(--border);
+}
 .no-recs { font-size: 13px; color: var(--t3); padding: 16px 0; }
+
+/* ── Health summary ── */
+.health-summary {
+  background: var(--surface2); border: 1px solid var(--border);
+  border-left: 3px solid var(--blue); border-radius: 6px;
+  padding: 14px 16px; margin-bottom: 18px;
+}
+.health-summary-label {
+  display: block; font-size: 11px; font-family: var(--mono); font-weight: 600;
+  color: var(--blue); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px;
+}
+.health-summary-text {
+  font-size: 14px; color: var(--t1); line-height: 1.7; margin: 0;
+}
+
+/* ── Call-to-action table ── */
+.cta-table-wrap { overflow-x: auto; }
+.cta-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+}
+.cta-table thead th {
+  font-size: 11px; font-family: var(--mono); font-weight: 600;
+  color: var(--t3); text-transform: uppercase; letter-spacing: .05em;
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
+  text-align: left; white-space: nowrap;
+}
+.cta-table tbody tr { border-bottom: 1px solid var(--border); }
+.cta-table tbody tr:last-child { border-bottom: none; }
+.cta-table tbody tr:hover { background: var(--surface2); }
+.cta-table td { padding: 10px; vertical-align: top; }
+.cta-table .rec-target {
+  font-size: 13px; font-weight: 600; color: var(--t1); white-space: nowrap;
+}
+.cta-table .rec-action {
+  font-family: var(--mono); font-size: 12px; color: var(--t2);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 4px; padding: 4px 8px; display: inline-block;
+  overflow-wrap: break-word; word-break: break-word; max-width: 360px;
+}
+.cta-table .rec-evidence-cell {
+  font-size: 12px; color: var(--t3); line-height: 1.5; max-width: 260px;
+}
 
 /* ── Footer ── */
 .report-footer {
@@ -429,11 +531,68 @@ code { font-family: var(--mono); font-size: 12px; color: var(--t2); }
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
+# Consequence-tier mapping: each section → ticket priority (P0 = highest risk)
+# P0 Data Safety / Availability  → cluster going down, failover fails, data loss
+# P1 Outage                      → writes fail, node down, storage exhausted
+# P2 Operational                 → resource pressure, degrading toward outage
+# P3 Performance                 → slow but cluster stays up
+# P4 Observability               → informational only
+SECTION_TIER: dict[str, str] = {
+    "Cluster Overview":          "P4",
+    "Replication Health":        "P0",
+    "Server Health":             "P1",
+    "Storage & Capacity":        "P1",
+    "Operations":                "P2",
+    "Connections & Concurrency": "P2",
+    "Infrastructure":            "P2",
+    "Query Performance":         "P3",
+    "Missing Indexes":           "P3",
+    "Unused Indexes":            "P4",
+}
+
+# Penalty per tier, applied once per tier (worst severity wins within a tier)
+_TIER_PENALTY: dict[str, dict[str, int]] = {
+    "P0": {"critical": 50, "warning": 20},
+    "P1": {"critical": 40, "warning": 15},
+    "P2": {"critical": 25, "warning": 10},
+    "P3": {"critical": 15, "warning":  5},
+    "P4": {"critical":  5, "warning":  2},
+}
+
+_TIER_LABEL: dict[str, str] = {
+    "P0": "Data Loss",
+    "P1": "Outage",
+    "P2": "Degraded",
+    "P3": "Slow",
+    "P4": "Observation",
+}
+
+
 def _health_score(report: HealthCheckReport) -> int:
+    """Consequence-tier penalty score (0–100).
+
+    Each section is assigned a ticket tier (P0–P4). One penalty is applied per tier
+    based on the worst severity present in that tier. Lower-consequence issues cost
+    fewer points, so a slow-query-only cluster still scores high while a replication
+    failure or disk-full drives the score well below 60.
+    """
     if not report.sections:
         return 100
-    weights = {HealthSeverity.OK: 1.0, HealthSeverity.WARNING: 0.6, HealthSeverity.CRITICAL: 0.0}
-    return round(sum(weights[s.severity] for s in report.sections) / len(report.sections) * 100)
+    # Determine worst severity per tier
+    tier_severity: dict[str, str] = {}
+    for s in report.sections:
+        tier = SECTION_TIER.get(s.name, "P4")
+        sev  = s.severity.value  # "ok" | "warning" | "critical"
+        prev = tier_severity.get(tier, "ok")
+        if sev == "critical" or (sev == "warning" and prev == "ok"):
+            tier_severity[tier] = sev
+    # Sum penalties
+    penalty = sum(
+        _TIER_PENALTY[tier][sev]
+        for tier, sev in tier_severity.items()
+        if sev != "ok"
+    )
+    return max(0, 100 - penalty)
 
 
 def _sticky_bar(cluster_label: str, severity: HealthSeverity, ts: str) -> str:
@@ -456,13 +615,14 @@ def _overall_health_summary(report: HealthCheckReport) -> str:
     sev_color = _COLOR[report.overall_severity]
     sev_label = _TAG_LABEL[report.overall_severity]
     tag_cls   = _TAG[report.overall_severity]
+
     return (
         f'<div class="overall-health">'
         f'<div class="oh-left">'
         f'<span class="oh-label">Overall health</span>'
         f'<span class="tag {tag_cls}">{sev_label}</span>'
         f'</div>'
-        f'<div class="oh-score" style="color:{sev_color}">'
+        f'<div class="oh-score" style="color:{sev_color};">'
         f'{score}<span class="oh-denom">&thinsp;/&thinsp;100</span>'
         f'</div>'
         f'</div>'
@@ -479,21 +639,53 @@ def _rating_explainer(report: HealthCheckReport) -> str:
     n_warn = sum(1 for s in report.sections if s.severity == HealthSeverity.WARNING)
     n_crit = sum(1 for s in report.sections if s.severity == HealthSeverity.CRITICAL)
 
-    parts: list[str] = []
-    if n_crit: parts.append(f"{n_crit}&thinsp;×&thinsp;Critical (0&thinsp;pts)")
-    if n_warn: parts.append(f"{n_warn}&thinsp;×&thinsp;Warning (60&thinsp;pts)")
-    if n_ok:   parts.append(f"{n_ok}&thinsp;×&thinsp;OK (100&thinsp;pts)")
-    worked = " + ".join(parts) + f"  /  {n}  =  <strong>{score}</strong>"
+    # Build per-tier breakdown for this run
+    tier_severity: dict[str, str] = {}
+    for s in report.sections:
+        tier = SECTION_TIER.get(s.name, "P4")
+        sev  = s.severity.value
+        prev = tier_severity.get(tier, "ok")
+        if sev == "critical" or (sev == "warning" and prev == "ok"):
+            tier_severity[tier] = sev
+
+    rows = ""
+    total_penalty = 0
+    for tier in ["P0", "P1", "P2", "P3", "P4"]:
+        sev = tier_severity.get(tier, "ok")
+        if sev == "ok":
+            penalty_str = "−0"
+            style = "color:var(--ok)"
+        else:
+            p = _TIER_PENALTY[tier][sev]
+            total_penalty += p
+            penalty_str = f"−{p}"
+            style = "color:var(--crit)" if sev == "critical" else "color:var(--warn)"
+        rows += (
+            f'<tr>'
+            f'<td>{tier}</td>'
+            f'<td>{_TIER_LABEL[tier]}</td>'
+            f'<td style="text-transform:capitalize">{sev}</td>'
+            f'<td style="{style};font-weight:600">{penalty_str}</td>'
+            f'</tr>'
+        )
 
     return (
         f'<details class="rating-info">'
         f'<summary>How is this score calculated?</summary>'
         f'<div class="rating-body">'
-        f'<p><strong>Overall severity</strong> (banner) is worst-case: one Critical section makes the'
-        f' entire cluster Critical; one Warning with all others OK → Warning.</p>'
-        f'<p><strong>Health score</strong> (gauge, 0–100) is a weighted average across all {n} sections:'
-        f' OK&nbsp;=&nbsp;100&thinsp;pts &middot; Warning&nbsp;=&nbsp;60&thinsp;pts &middot; Critical&nbsp;=&nbsp;0&thinsp;pts.</p>'
-        f'<p class="rating-formula">This run: {worked}</p>'
+        f'<p>Score starts at <strong>100</strong> and deducts points based on the consequence of each issue.'
+        f' Sections are grouped into consequence tiers — a replication failure (P0) costs more than'
+        f' a slow query (P3). One penalty per tier; worst severity within the tier applies.</p>'
+        f'<table style="width:100%;border-collapse:collapse;font-size:0.82rem;margin:8px 0">'
+        f'<thead><tr style="color:var(--t2);border-bottom:1px solid var(--border)">'
+        f'<th style="text-align:left;padding:3px 8px 3px 0">Tier</th>'
+        f'<th style="text-align:left;padding:3px 8px">Consequence</th>'
+        f'<th style="text-align:left;padding:3px 8px">This run</th>'
+        f'<th style="text-align:right;padding:3px 0 3px 8px">Penalty</th>'
+        f'</tr></thead>'
+        f'<tbody>{rows}</tbody>'
+        f'</table>'
+        f'<p class="rating-formula">100 &minus; {total_penalty} = <strong>{score}</strong></p>'
         f'</div>'
         f'</details>'
     )
@@ -504,19 +696,24 @@ def _fmt(v: object) -> str:
     if isinstance(v, int):   return f"{v:,}"
     return str(v)
 
+# Signals where LOW value is the problem (matches llm_recommender._BELOW_THRESHOLD_IS_BAD)
+_BELOW_THRESHOLD_IS_BAD = frozenset({
+    "wt_cache_hit_ratio",   # low hit rate = reads hitting disk
+    "tickets_reads",        # low remaining tickets = read exhaustion
+    "tickets_writes",       # low remaining tickets = write stall
+    "oplog_window_hours",   # short window = secondary sync risk
+})
+
+
 def _is_breached(sig) -> bool:
-    """True if the signal value is outside its threshold in either direction."""
+    """True if the signal value has crossed its threshold in the bad direction."""
     if sig.threshold is None:
         return False
     if not isinstance(sig.value, (int, float)) or not isinstance(sig.threshold, (int, float)):
         return False
-    # Standard: value exceeds threshold (e.g. slow query count, lock wait %)
-    if sig.value > sig.threshold:
-        return True
-    # Inverse: value falls significantly below threshold (e.g. cache hit ratio)
-    if sig.threshold > 0 and sig.value < sig.threshold * 0.95:
-        return True
-    return False
+    if sig.name in _BELOW_THRESHOLD_IS_BAD:
+        return sig.value < sig.threshold
+    return sig.value > sig.threshold
 
 
 # ── sidebar ────────────────────────────────────────────────────────────────────
@@ -534,9 +731,6 @@ def _sidebar(report: HealthCheckReport, score: int) -> str:
         if anchor == "alerts":
             if n_issues == 0: return "d-gray"
             return "d-red" if any(s.severity == HealthSeverity.CRITICAL for s in report.sections) else "d-amber"
-        if anchor == "sec-indexes":
-            sevs = [by_name[n].severity for n in ("Missing Indexes", "Unused Indexes") if n in by_name]
-            return _DOT[worst_severity(sevs)] if sevs else "d-gray"
         if anchor == "recommendations":
             return "d-green" if report.recommendations else "d-gray"
         return "d-gray"
@@ -547,7 +741,7 @@ def _sidebar(report: HealthCheckReport, score: int) -> str:
         for label, anchor, section_name in items:
             display = label
             if anchor == "alerts":
-                display = f"Alerts ({n_issues})" if n_issues else "Alerts"
+                display = f"Active alerts ({n_issues})" if n_issues else "Active alerts"
             dot_cls = _dot(anchor, section_name)
             nav_items.append(
                 f'    <a class="nav-item" href="#{anchor}">'
@@ -637,6 +831,83 @@ def _status_bar(report: HealthCheckReport) -> str:
 
 # ── metric grid ───────────────────────────────────────────────────────────────
 
+_METRIC_TOOLTIPS: dict[str, str] = {
+    # §2 Server Health
+    "mongodb_version":          "MongoDB server version. Current supported releases: 7.0 (LTS), 8.0 (LTS). Versions 5.0 and earlier are end-of-life. Ensure all replica set members run the same version.",
+    "uptime_hours":             "Time since mongod last started. A recent restart may indicate a crash or planned maintenance.",
+    "filesystem_disk_used_gb":  "Disk space used as reported by MongoDB's filesystem view (fsUsedSize). On Linux production servers this matches OS-level usage reliably.",
+    "filesystem_disk_used_pct": "Percentage of total disk used. Above 80% MongoDB may refuse writes. Above 90% is critical — free space immediately.",
+    # §3 Replication Health
+    "oplog_window_hours":       "How many hours of write history the oplog can hold. If a secondary falls behind by more than this window it must be re-synced from scratch. Below 24 h is a risk.",
+    "member_count":             "Number of configured replica set members (primary + secondaries + arbiters). A minimum of 3 members with votes is required for automatic failover.",
+    # §4 Storage & Capacity
+    "mongodb_data_mb":          "Total uncompressed data size across all user collections. This is the logical size; on-disk storage is smaller due to WiredTiger compression.",
+    "mongodb_index_mb":         "Total size of all indexes in memory. High index size relative to data size may indicate over-indexing.",
+    "collections_analysed":     "Number of collections included in the storage analysis.",
+    # §5 Query Performance
+    "slow_query_count":         "Number of operations that exceeded the slow query threshold (default 5 ms). A high count indicates missing indexes or inefficient queries.",
+    "collscan_count":           "Number of slow operations that used a COLLSCAN plan — meaning no index was used and the entire collection was scanned. Every COLLSCAN is a candidate for an index.",
+    "sort_stage_count":         "Number of slow operations that required an in-memory sort stage (SORT plan). In-memory sorts are bounded by 100 MB; above that MongoDB aborts the query unless allowDiskUse is set.",
+    "sort_spill_count":         "Number of slow operations where the in-memory sort exceeded the 100 MB limit and spilled to disk. Any non-zero value is a significant performance concern.",
+    "max_execution_ms":         "Execution time of the single slowest query in this run. A one-off spike may be acceptable; a consistently high max indicates a problematic query pattern.",
+    "avg_execution_ms":         "Average execution time of all slow queries. Values above 100 ms on a production cluster typically indicate index gaps or large full scans.",
+    # §8 Operations
+    "memory_resident_mb":       "RAM currently used by the mongod process. In production this should approach total server RAM — MongoDB keeps its working set in memory. Unexpectedly low values may mean the working set exceeds RAM and is being evicted.",
+    "page_faults":              "Cumulative count of times MongoDB read a data page from disk because it was not in the WiredTiger cache. The rate between health check runs matters more than the total — a rising rate signals memory pressure.",
+    "wt_cache_hit_ratio":       "Percentage of read operations served from WiredTiger's in-memory cache without touching disk. Below 95% means the working set is larger than the cache — consider adding RAM or reducing the working set.",
+    "lock_wait_pct":            "Percentage of time operations spent waiting to acquire a global lock. Above 5% indicates write contention or long-running operations starving concurrent reads.",
+    "cluster_targeting_ratio":  "Documents examined divided by documents returned across all queries since last restart. A ratio above 10 means queries are scanning far more data than needed — the primary cause is missing indexes. 1.0 is perfect (every scanned document is returned).",
+    # §9 Connections & Concurrency
+    "total_connections":        "Total current client connections across all replica set members. High connection counts consume memory (~1 MB per connection). Use connection pooling to reduce this.",
+    "tickets_reads":            "WiredTiger read tickets available on the most constrained member. Tickets limit concurrent read operations into the storage engine. If this approaches 0, reads queue and latency spikes.",
+    "tickets_writes":           "WiredTiger write tickets available on the most constrained member. If this approaches 0, writes queue and the cluster effectively stalls.",
+    "lock_queue_total":         "Peak global lock queue depth — operations waiting for a lock grant. Sustained values above 5 indicate write-heavy workloads are blocking reads.",
+    # §10 Infrastructure
+    "cpu_user_pct":             "Normalised CPU time used by the mongod process itself (divided by CPU core count). Above 70% sustained means MongoDB is compute-bound — look for expensive aggregations or missing indexes.",
+    "cpu_iowait_pct":           "CPU time the system spent waiting for disk I/O. Above 20% means the disk subsystem is a bottleneck — check IOPS capacity, disk queue depth, and whether the working set fits in memory.",
+    "system_memory_used_pct":   "Percentage of total system RAM in use. Above 90% risks the OS swapping MongoDB's memory to disk, causing severe latency spikes.",
+    "disk_iops_write":          "Write I/O operations per second on the primary's data partition. Compare against your disk's rated IOPS ceiling — sustained saturation causes write stalls.",
+    "disk_write_latency_ms":    "Average write latency on the primary's data partition. Above 20 ms indicates I/O saturation or a slow disk subsystem; above 50 ms is a critical bottleneck.",
+    # §5 Query Performance — BL-006
+    "profiler_disabled_dbs":    "Number of databases where the MongoDB profiler is turned off (level 0). Slow query data cannot be captured when the profiler is disabled — enable it with db.setProfilingLevel(1, {slowms: 5}).",
+    "profiler_high_slowms_dbs": "Number of databases where the profiler's slowms threshold exceeds 100 ms. Queries faster than this threshold are not captured, creating blind spots in performance analysis.",
+    # §7 Unused Indexes — BL-007
+    "redundant_indexes":        "Number of indexes whose key pattern is a left-prefix of another index on the same collection. These are fully redundant — the compound index satisfies all queries the shorter index could handle. Dropping them reduces write overhead and storage.",
+}
+
+
+_SIGNAL_LABELS: dict[str, str] = {
+    # §1 Cluster Overview
+    "database_count":             "Databases",
+    "collection_count":           "Collections",
+    # §4 Storage & Capacity
+    "mongodb_data_mb":            "Data Size",
+    "mongodb_index_mb":           "Index Size",
+    "collections_analysed":       "Collections",
+    # §2 Server Health
+    "mongodb_version":            "Version",
+    "uptime_hours":               "Uptime",
+    "filesystem_disk_used_gb":    "Disk Used",
+    "filesystem_disk_used_pct":   "Disk Used %",
+    # §9 Connections & Concurrency
+    "total_connections":          "Connections",
+    "tickets_reads":              "Read Tickets",
+    "tickets_writes":             "Write Tickets",
+    "lock_queue_total":           "Lock Queue Depth",
+    # §10 Infrastructure
+    "cpu_user_pct":               "CPU User %",
+    "cpu_iowait_pct":             "CPU I/O Wait %",
+    "system_memory_used_pct":     "Memory Used %",
+    "disk_iops_write":            "Disk Write IOPS",
+    "disk_write_latency_ms":      "Disk Write Latency",
+    # §7 Unused Indexes (BL-007)
+    "redundant_indexes":          "Redundant Indexes",
+    # §5 Query Performance (BL-006)
+    "profiler_disabled_dbs":      "Profiler Off",
+    "profiler_high_slowms_dbs":   "Profiler slowms > 100",
+}
+
+
 def _metric_grid(section: ReportSection) -> str:
     if not section.signals:
         return ""
@@ -654,9 +925,24 @@ def _metric_grid(section: ReportSection) -> str:
             f'<div class="metric-limit">threshold {_fmt(sig.threshold)}{" " + sig.unit if sig.unit else ""}</div>'
             if sig.threshold is not None else ""
         )
+        label = _SIGNAL_LABELS.get(sig.name, sig.name.replace("_", " ").title())
+        # Tooltip: prefer LLM-generated on sig.tooltip, fall back to static dict
+        tip_text = sig.tooltip or _METRIC_TOOLTIPS.get(sig.name, "")
+        if tip_text:
+            import html as _html
+            safe = _html.escape(tip_text)
+            info_html = (
+                f'<span class="minfo" tabindex="0">'
+                f'<input class="minfo-chk" type="checkbox" aria-hidden="true">'
+                f'<span class="minfo-icon" aria-label="{safe}" role="img">i</span>'
+                f'<span class="minfo-tip">{safe}</span>'
+                f'</span>'
+            )
+        else:
+            info_html = ""
         cards.append(
             f'<div class="metric {m_cls}">'
-            f'<div class="metric-lbl">{sig.name.replace("_", " ").title()}</div>'
+            f'<div class="metric-lbl">{label}{info_html}</div>'
             f'<div class="metric-val" style="color:{val_color}">{_fmt(sig.value)}</div>'
             f'{unit_html}'
             f'{limit_html}'
@@ -778,43 +1064,53 @@ def _placeholder_section(anchor_id: str, title: str, unavailable: list[str], bac
 
 # ── recommendations ───────────────────────────────────────────────────────────
 
-def _recommendations_html(recs: list) -> str:
+def _health_summary_html(report: "HealthCheckReport") -> str:
+    """LLM-generated natural language health summary block."""
+    if not report.health_summary:
+        return ""
+    import html as _html
+    return (
+        f'<div class="health-summary">'
+        f'<span class="health-summary-label">AI Summary</span>'
+        f'<p class="health-summary-text">{_html.escape(report.health_summary)}</p>'
+        f'</div>'
+    )
+
+
+def _recommendations_html(report: "HealthCheckReport") -> str:
+    recs = report.recommendations
     if not recs:
         return (
             '<div class="section" id="recommendations">'
             '<div class="section-hd">'
-            '<span class="section-title">Recommendations</span>'
+            '<span class="section-title">Action Plan</span>'
             '</div>'
-            '<div class="no-recs">No actions required — cluster looks healthy.</div>'
+            + _health_summary_html(report)
+            + '<div class="no-recs">No actions required — cluster looks healthy.</div>'
             '</div>'
         )
 
-    items: list[str] = []
-    for rec in recs:
-        pri_cls  = _REC_PRI.get(rec.priority, "rp2")
-        pri_lbl  = _REC_LBL.get(rec.priority, "P2")
-        is_llm   = rec.confidence == "llm"
+    import html as _html
 
-        if is_llm:
-            conf_html = (
-                f'<span class="conf-llm">AI-generated</span>'
-                f'<span class="badge-ai">LLM</span>'
-            )
-        else:
-            conf_cls = {"high": "conf-high", "medium": "conf-med", "low": "conf-low"}.get(
-                rec.confidence, "conf-low"
-            )
-            conf_html = f'<span class="{conf_cls}">{rec.confidence} confidence</span>'
-
-        items.append(
-            f'<li class="rec-item">'
-            f'<span class="rec-p {pri_cls}">{pri_lbl}</span>'
-            f'<div class="rec-body">'
-            f'<div class="rec-collection">{rec.collection}</div>'
-            f'<code class="rec-action">{rec.action}</code>'
-            f'<div class="rec-evidence">{rec.evidence}</div>'
-            f'<div class="rec-meta">{conf_html}</div>'
-            f'</div></li>'
+    _PRI_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3, "P4": 4}
+    rows: list[str] = []
+    for rec in sorted(recs, key=lambda r: _PRI_ORDER.get(r.priority, 9)):
+        pri_cls = _REC_PRI.get(rec.priority, "rp4")
+        pri_lbl = _REC_LBL.get(rec.priority, rec.priority)
+        is_llm  = rec.confidence == "llm"
+        src_html = (
+            '<span class="badge-ai">AI</span>'
+            if is_llm else
+            f'<span class="badge-rule">Rule</span>'
+        )
+        rows.append(
+            f'<tr>'
+            f'<td><span class="rec-p {pri_cls}">{pri_lbl}</span></td>'
+            f'<td class="rec-target">{_html.escape(rec.collection)}</td>'
+            f'<td><code class="rec-action">{_html.escape(rec.action)}</code></td>'
+            f'<td class="rec-evidence-cell">{_html.escape(rec.evidence)}</td>'
+            f'<td>{src_html}</td>'
+            f'</tr>'
         )
 
     worst_pri = "tag-red" if any(r.priority == "high" for r in recs) else "tag-amber"
@@ -822,10 +1118,18 @@ def _recommendations_html(recs: list) -> str:
     return (
         f'<div class="section" id="recommendations">'
         f'<div class="section-hd">'
-        f'<span class="section-title">Prioritised recommendations</span>'
+        f'<span class="section-title">Action Plan</span>'
         f'<span class="tag {worst_pri}">{n} action{"s" if n != 1 else ""}</span>'
         f'</div>'
-        f'<ul class="rec-list">{"".join(items)}</ul>'
+        + _health_summary_html(report)
+        + f'<div class="cta-table-wrap">'
+        f'<table class="cta-table">'
+        f'<thead><tr>'
+        f'<th>Priority</th><th>Target</th><th>Action</th><th>Evidence</th><th>Source</th>'
+        f'</tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody>'
+        f'</table>'
+        f'</div>'
         f'</div>'
     )
 
@@ -841,20 +1145,44 @@ def _build_content(report: HealthCheckReport) -> str:
         anchor, display = _SECTION_META[runner_name]
         return _section_card(by_name[runner_name], anchor, display)
 
-    blocks: list[str] = [
+    def group_header(label: str) -> str:
+        return (
+            f'<div class="content-group">'
+            f'<span class="content-group-label">{label}</span>'
+            f'<span class="content-group-rule"></span>'
+            f'</div>'
+        )
+
+    hr = '\n<hr class="divider">\n'
+
+    return "".join([
+        # Summary
         card("Cluster Overview"),
-        card("Server Health"),
+        hr,
         _alerts_section(report),
-        card("Query Performance"),
-        card("Missing Indexes"),
-        card("Unused Indexes"),
-        card("Operations"),
-        card("Connections & Concurrency"),
-        card("Infrastructure"),
+        # Availability
+        group_header("Availability"),
         card("Replication Health"),
+        hr,
+        card("Connections & Concurrency"),
+        # Resource Health
+        group_header("Resource Health"),
+        card("Server Health"),
+        hr,
         card("Storage & Capacity"),
-    ]
-    return "\n<hr class=\"divider\">\n".join(b for b in blocks if b)
+        hr,
+        card("Infrastructure"),
+        # Performance
+        group_header("Performance"),
+        card("Query Performance"),
+        hr,
+        card("Operations"),
+        # Index Advisory
+        group_header("Index Advisory"),
+        card("Missing Indexes"),
+        hr,
+        card("Unused Indexes"),
+    ])
 
 
 # ── JavaScript ────────────────────────────────────────────────────────────────
@@ -915,19 +1243,18 @@ def render_html(report: HealthCheckReport) -> str:
     <div class="report-title">MongoDB cluster health report</div>
     <div class="report-cluster">{cluster_label}</div>
     <div class="report-sub">{ts} &middot; Run&thinsp;{report.run_id} &middot; {len(report.sections)} sections &middot; {len(report.recommendations)} recommendation{"s" if len(report.recommendations) != 1 else ""}</div>
+    <div class="report-sub" style="margin-top:4px;font-size:0.78rem;opacity:0.6;">{"Agent v" + report.agent_version if report.agent_version else ""}{(" &middot; OM " + report.om_version) if report.om_version else ""}</div>
   </div>
 
   {_overall_health_summary(report)}
 
   {_rating_explainer(report)}
 
+  {_recommendations_html(report)}
+
   {_status_bar(report)}
 
   {_build_content(report)}
-
-  <hr class="divider">
-
-  {_recommendations_html(report.recommendations)}
 
   <div class="report-footer">
     mongodb-dba-agent · {cluster_label} · {ts}

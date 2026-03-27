@@ -20,7 +20,8 @@ class OMClient:
     """Thin read-only client for the Ops Manager Public API v1.0."""
 
     def __init__(self, url: str, group_id: str, public_key: str, private_key: str) -> None:
-        self._base = f"{url.rstrip('/')}/api/public/v1.0/groups/{group_id}"
+        self._root = f"{url.rstrip('/')}/api/public/v1.0"
+        self._base = f"{self._root}/groups/{group_id}"
         self._auth = HTTPDigestAuth(public_key, private_key)
 
     # ── private ────────────────────────────────────────────────────────────────
@@ -51,6 +52,16 @@ class OMClient:
         return None
 
     # ── public ─────────────────────────────────────────────────────────────────
+
+    def get_version(self) -> Optional[str]:
+        """Return the Ops Manager server version string, or None on failure."""
+        try:
+            r = requests.get(f"{self._root}/", auth=self._auth, timeout=_TIMEOUT_S)
+            r.raise_for_status()
+            return r.json().get("version")
+        except Exception as exc:
+            logger.warning("OM version check failed: %s", exc)
+            return None
 
     def get_hosts(self) -> List[Dict]:
         """Return all registered host docs for the group; [] on failure."""

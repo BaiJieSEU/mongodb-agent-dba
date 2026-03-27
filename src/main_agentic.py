@@ -1,5 +1,7 @@
 """Main entry point for Agentic MongoDB DBA Agent"""
 
+__version__ = "0.7.7"
+
 import argparse
 import logging
 import sys

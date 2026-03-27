@@ -82,6 +82,45 @@ class AgentConfig(BaseModel):
     llm_recommendations: bool = False   # BL-034: enrich health check recs with LLM
 
 
+class ThresholdsConfig(BaseModel):
+    """Health check severity thresholds (BL-021). All values have safe defaults."""
+    # Query Performance
+    slow_query_pct_warning: float   = 5.0
+    slow_query_pct_critical: float  = 20.0
+    slow_query_ms_warning: int      = 100
+    slow_query_ms_critical: int     = 500
+    # Replication Health
+    oplog_window_warning_hours: int  = 24
+    oplog_window_critical_hours: int = 4
+    # Storage & Capacity
+    disk_used_pct_warning: int  = 80
+    disk_used_pct_critical: int = 90
+    # Operations — WiredTiger cache
+    cache_hit_ratio_warning: float  = 0.95
+    cache_hit_ratio_critical: float = 0.80
+    # Operations — lock contention
+    lock_wait_pct_warning: float  = 5.0
+    lock_wait_pct_critical: float = 20.0
+    # Operations — query targeting
+    query_targeting_warning: float  = 10.0
+    query_targeting_critical: float = 100.0
+    # Operations — memory
+    memory_resident_warning_mb: int  = 4096
+    memory_resident_critical_mb: int = 8192
+    # Connections & Concurrency
+    connections_warning: int  = 500
+    tickets_warning: int      = 10
+    lock_queue_warning: int   = 10
+    # Infrastructure
+    cpu_user_pct_warning: float              = 80.0
+    cpu_iowait_pct_warning: float            = 10.0
+    disk_write_latency_warning_ms: float     = 10.0
+    system_memory_used_pct_warning: float    = 90.0
+    # Index analysis
+    full_scan_examined_min: int        = 1000
+    full_scan_selectivity_max: float   = 0.01
+
+
 class DemoConfig(BaseModel):
     users_count: int
     products_count: int
@@ -95,6 +134,7 @@ class AppConfig(BaseModel):
     demo: DemoConfig
     logging: Dict[str, Any]
     ops_manager: OMConfig = OMConfig()
+    thresholds: ThresholdsConfig = ThresholdsConfig()
 
 
 def _apply_env_overrides(config: AppConfig) -> AppConfig:

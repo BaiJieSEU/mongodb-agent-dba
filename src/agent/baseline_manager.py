@@ -269,7 +269,7 @@ class BaselineManager:
         """Extract key signals from report sections and persist to rolling baseline."""
         # Maps (section_name, signal_name) → baseline_metric_key
         _SIGNAL_MAP: Dict[Tuple[str, str], str] = {
-            ("Query Performance", "slow_query_count"):      "slow_query_count",
+            ("Query Performance", "slow_query_pct"):        "slow_query_pct",
             ("Query Performance", "max_execution_ms"):      "max_execution_ms",
             ("Server Health",     "filesystem_disk_used_pct"): "disk_used_pct",
             ("Replication Health","oplog_window_hours"):    "oplog_window_hours",

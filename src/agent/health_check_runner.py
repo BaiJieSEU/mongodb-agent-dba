@@ -47,10 +47,11 @@ logger = logging.getLogger(__name__)
 
 REPORTS_DIR = Path("reports")
 
-# Severity thresholds — will move to agent_config.yaml in BL-021
-_THRESHOLDS = {
-    "slow_query_count_warning": 5,
-    "slow_query_count_critical": 20,
+# Severity thresholds — defaults only; live values loaded from agent_config.yaml (BL-021).
+# Keep this dict in sync with ThresholdsConfig in config_loader.py.
+_THRESHOLDS_DEFAULTS = {
+    "slow_query_pct_warning": 5.0,
+    "slow_query_pct_critical": 20.0,
     "slow_query_ms_warning": 100,
     "slow_query_ms_critical": 500,
     "disk_used_pct_warning": 80,
@@ -59,20 +60,17 @@ _THRESHOLDS = {
     "oplog_window_critical_hours": 4,
     "full_scan_examined_min": 1000,
     "full_scan_selectivity_max": 0.01,
-    # §8 Operations (BL-009)
-    "cache_hit_ratio_warning": 0.95,   # below 95 % → warning
-    "cache_hit_ratio_critical": 0.80,  # below 80 % → critical
-    "lock_wait_pct_warning": 5.0,      # lock wait > 5 % → warning
-    "lock_wait_pct_critical": 20.0,    # lock wait > 20 % → critical
-    "query_targeting_warning": 10.0,   # scanned-to-returned ratio > 10 → warning
-    "query_targeting_critical": 100.0, # scanned-to-returned ratio > 100 → critical
-    "memory_resident_warning_mb": 4096,   # RSS > 4 GB → warning (indicative)
-    "memory_resident_critical_mb": 8192,  # RSS > 8 GB → critical (indicative)
-    # §9 Connections & Concurrency (BL-013)
+    "cache_hit_ratio_warning": 0.95,
+    "cache_hit_ratio_critical": 0.80,
+    "lock_wait_pct_warning": 5.0,
+    "lock_wait_pct_critical": 20.0,
+    "query_targeting_warning": 10.0,
+    "query_targeting_critical": 100.0,
+    "memory_resident_warning_mb": 4096,
+    "memory_resident_critical_mb": 8192,
     "connections_warning": 500,
     "tickets_warning": 10,
     "lock_queue_warning": 10,
-    # §10 Infrastructure (BL-015)
     "cpu_user_pct_warning": 80.0,
     "cpu_iowait_pct_warning": 10.0,
     "disk_write_latency_warning_ms": 10.0,
@@ -98,6 +96,11 @@ class HealthCheckRunner:
         self._save_report_flag = save_report
         self._mcp: Optional[MCPClient] = None
         self._mongo: Optional[MongoDBManager] = None
+        # BL-021: thresholds from agent_config.yaml, falling back to hard-coded defaults
+        self._thresholds: Dict[str, Any] = {
+            **_THRESHOLDS_DEFAULTS,
+            **config.thresholds.model_dump(),
+        }
 
     # ── public entry point ─────────────────────────────────────────────────────
 
@@ -163,6 +166,10 @@ class HealthCheckRunner:
         recommendations = self._build_recommendations(slow_queries, sections, unused_indexes)
         overall = worst_severity([s.severity for s in sections])
 
+        # BL-087: agent version + optional OM version in report header
+        from main_agentic import __version__ as _agent_version
+        _om_version = self._om.get_version() if self._om else ""
+
         report = HealthCheckReport(
             run_id=run_id,
             timestamp=timestamp,
@@ -171,13 +178,19 @@ class HealthCheckRunner:
             overall_severity=overall,
             sections=sections,
             recommendations=recommendations,
+            agent_version=_agent_version,
+            om_version=_om_version or "",
         )
 
-        # BL-034: LLM enrichment — cross-section reasoning on top of rule-based recs
+        # BL-084 + health summary: LLM enrichment — signal tooltips + natural language summary
+        # (BL-034 recommendation enrichment removed: rule-based recommendations are sufficient)
         if self.config.agent.llm_recommendations:
             from agent.llm_recommender import LLMRecommender
-            logger.info("BL-034: running LLM recommendation enrichment")
-            report.recommendations = LLMRecommender(self.config).enrich(report)
+            llm_rec = LLMRecommender(self.config)
+            logger.info("BL-084: running LLM signal tooltip enrichment")
+            llm_rec.enrich_signal_tooltips(report)
+            logger.info("Generating LLM health summary")
+            report.health_summary = llm_rec.generate_health_summary(report)
 
         # BL-021: persist this run's metrics for future baseline comparisons
         self._baseline.record_from_report(report)
@@ -196,9 +209,14 @@ class HealthCheckRunner:
             collections_by_db[db] = [c for c in colls if not c.startswith("system.")]
 
         total_colls = sum(len(v) for v in collections_by_db.values())
-        findings = [f"{len(user_dbs)} user database(s), {total_colls} collection(s) total."]
-        for db, colls in collections_by_db.items():
-            findings.append(f"  {db}: {', '.join(colls) if colls else '(empty)'}")
+        # Show DB names (not in metric cards) but not collection lists (too noisy for overview)
+        findings = [
+            f"User database{'s' if len(user_dbs) != 1 else ''}: "
+            + ", ".join(
+                f"{db} ({len(colls)} collection{'s' if len(colls) != 1 else ''})"
+                for db, colls in collections_by_db.items()
+            )
+        ]
 
         return ReportSection(
             name="Cluster Overview",
@@ -245,24 +263,22 @@ class HealthCheckRunner:
         # BL-021: baseline-aware disk severity (hard limit: > 95% always CRITICAL)
         severity, disk_note = self._baseline.assess(
             "disk_used_pct", disk_used_pct,
-            static_warn=_THRESHOLDS["disk_used_pct_warning"],
-            static_crit=_THRESHOLDS["disk_used_pct_critical"],
+            static_warn=self._thresholds["disk_used_pct_warning"],
+            static_crit=self._thresholds["disk_used_pct_critical"],
         )
 
         findings = [
-            f"MongoDB {version}  ·  host: {hostname}  ·  uptime: {uptime_hours}h",
-            f"Filesystem disk: {disk_used_gb} GB used of {disk_total_gb} GB ({disk_used_pct}%)",
-            "Note: disk figures are from MongoDB's filesystem view (fsUsedSize) and may differ"
-            " from OS tools on macOS/APFS due to purgeable space and snapshots."
-            " Reliable on Linux production servers.",
+            f"Host: {hostname}",
+            f"Disk figures are from MongoDB's filesystem view (fsUsedSize) — may differ"
+            " from OS tools on macOS/APFS. Reliable on Linux production servers.",
         ]
         if self._baseline.is_cold_start:
-            findings.append(f"Severity assessment: {self._baseline.cold_start_note()}")
+            findings.append(f"Baseline: {self._baseline.cold_start_note()}")
         if severity != HealthSeverity.OK:
             label = ("CRITICAL: risk of mongod write failures."
                      if severity == HealthSeverity.CRITICAL else "WARNING: monitor closely.")
             note_str = f"  {disk_note}" if disk_note else ""
-            findings.append(f"Filesystem disk at {disk_used_pct}% — {label}{note_str}")
+            findings.append(f"Disk at {disk_used_pct}% of {disk_total_gb} GB — {label}{note_str}")
 
         return ReportSection(
             name="Server Health",
@@ -271,7 +287,7 @@ class HealthCheckRunner:
                 Signal("mongodb_version", version),
                 Signal("uptime_hours", uptime_hours, "hours"),
                 Signal("filesystem_disk_used_gb", disk_used_gb, "GB"),
-                Signal("filesystem_disk_used_pct", disk_used_pct, "%", _THRESHOLDS["disk_used_pct_warning"]),
+                Signal("filesystem_disk_used_pct", disk_used_pct, "%", self._thresholds["disk_used_pct_warning"]),
             ],
             findings=findings,
         )
@@ -330,8 +346,8 @@ class HealthCheckRunner:
         if oplog_window_hours is not None:
             severity, _oplog_note = self._baseline.assess(
                 "oplog_window_hours", oplog_window_hours,
-                static_warn=_THRESHOLDS["oplog_window_warning_hours"],
-                static_crit=_THRESHOLDS["oplog_window_critical_hours"],
+                static_warn=self._thresholds["oplog_window_warning_hours"],
+                static_crit=self._thresholds["oplog_window_critical_hours"],
                 higher_is_worse=False,
             )
 
@@ -378,14 +394,14 @@ class HealthCheckRunner:
             if severity != HealthSeverity.OK:
                 findings.append(
                     f"Oplog window ({oplog_window_hours}h) is below the "
-                    f"{_THRESHOLDS['oplog_window_warning_hours']}h minimum — "
+                    f"{self._thresholds['oplog_window_warning_hours']}h minimum — "
                     f"risk of replication failure after extended secondary downtime."
                 )
 
         signals: List[Signal] = [Signal("replica_set_members", len(members), "members")]
         if oplog_window_hours is not None:
             signals.append(Signal("oplog_window_hours", oplog_window_hours, "hours",
-                                  _THRESHOLDS["oplog_window_warning_hours"]))
+                                  self._thresholds["oplog_window_warning_hours"]))
 
         return ReportSection(
             name="Replication Health",
@@ -427,16 +443,23 @@ class HealthCheckRunner:
         # Severity based on MongoDB data size, not filesystem (filesystem is in Server Health)
         severity = HealthSeverity.OK
 
-        findings = [
-            f"MongoDB data: {total_data_mb:.1f} MB  ·  Indexes: {total_index_mb:.1f} MB"
-            f"  ·  {len(coll_stats)} collection(s) analysed",
-            "Collections by size (largest first):",
-        ]
-        for s in coll_stats[:5]:
-            findings.append(
-                f"  {s['db']}.{s['collection']}: {s['size_mb']} MB  "
-                f"{s['doc_count']:,} docs  avg {s['avg_bytes']} bytes/doc"
-            )
+        # Only surface storage findings when there is an anomaly worth investigating.
+        # Raw size rankings with no threshold context add noise, not signal.
+        findings: List[str] = []
+        if total_data_mb > 0:
+            for s in coll_stats:
+                share = s["size_mb"] / total_data_mb
+                if share > 0.7 and len(coll_stats) > 1:
+                    findings.append(
+                        f"{s['db']}.{s['collection']} holds {share*100:.0f}% of total data "
+                        f"({s['size_mb']:.1f} MB of {total_data_mb:.1f} MB) — "
+                        f"verify this is expected."
+                    )
+                if s["avg_bytes"] > 50_000:
+                    findings.append(
+                        f"{s['db']}.{s['collection']}: avg document size {s['avg_bytes']:,} bytes — "
+                        f"consider schema review or projection to reduce working-set pressure."
+                    )
 
         return ReportSection(
             name="Storage & Capacity",
@@ -444,7 +467,6 @@ class HealthCheckRunner:
             signals=[
                 Signal("mongodb_data_mb",  round(total_data_mb, 1),  "MB"),
                 Signal("mongodb_index_mb", round(total_index_mb, 1), "MB"),
-                Signal("collections_analysed", len(coll_stats), "collections"),
             ],
             findings=findings,
         )
@@ -455,8 +477,27 @@ class HealthCheckRunner:
         threshold = self.config.agent.slow_query_threshold_ms
         limit     = self.config.agent.max_queries_to_analyze
 
-        slow_queries: List[Dict[str, Any]] = []
+        # BL-006: check profiler configuration for each user database
+        profiler_off_dbs:      List[str] = []
+        profiler_high_ms_dbs:  List[str] = []
         for db in user_dbs:
+            try:
+                status = self._mongo.monitored_cluster[db].command({"profile": -1})
+                level  = status.get("was", status.get("level", -1))
+                slowms = status.get("slowms", 0)
+                if level == 0:
+                    profiler_off_dbs.append(db)
+                elif slowms > 100:
+                    profiler_high_ms_dbs.append(db)
+            except Exception as exc:
+                logger.warning("BL-006: profiler status unavailable for %s: %s", db, exc)
+
+        slow_queries: List[Dict[str, Any]] = []
+        total_profiled = 0   # all queries captured by the profiler (denominator for %)
+        for db in user_dbs:
+            # Count every profiler entry (excludes cursor/admin noise — same filter as slow)
+            _prof_filter = {"op": {"$nin": ["getmore", "killCursors"]}}
+            total_profiled += self._mcp.count(db, "system.profile", filter=_prof_filter)
             for doc in self._mcp.find(
                 db, "system.profile",
                 filter={"millis": {"$gte": threshold}, "op": {"$nin": ["getmore", "killCursors"]}},
@@ -489,29 +530,32 @@ class HealthCheckRunner:
         max_ms = max((q["execution_time_ms"] for q in slow_queries), default=0)
         avg_ms = sum(q["execution_time_ms"] for q in slow_queries) / count if count else 0.0
 
+        # Percentage of profiled queries that were slow (same window — both from system.profile)
+        slow_pct = round(count / total_profiled * 100, 1) if total_profiled > 0 else 0.0
+
         # Scan & sort aggregate metrics
         collscan_count    = sum(1 for q in slow_queries if "COLLSCAN" in q["plan_summary"])
         sort_stage_count  = sum(1 for q in slow_queries if q["has_sort_stage"])
         sort_spill_count  = sum(1 for q in slow_queries if q["sort_spills"] > 0)
         total_spill_bytes = sum(q["sort_spill_bytes"] for q in slow_queries)
 
-        # BL-021: baseline-aware slow query severity
-        if count == 0:
+        # BL-021/BL-093: severity based on % of profiled queries that are slow
+        if total_profiled == 0 or count == 0:
             severity = HealthSeverity.OK
-            _count_note = ""
+            _pct_note = ""
             _ms_note = ""
         else:
-            count_sev, _count_note = self._baseline.assess(
-                "slow_query_count", count,
-                static_warn=_THRESHOLDS["slow_query_count_warning"],
-                static_crit=_THRESHOLDS["slow_query_count_critical"],
+            pct_sev, _pct_note = self._baseline.assess(
+                "slow_query_pct", slow_pct,
+                static_warn=self._thresholds["slow_query_pct_warning"],
+                static_crit=self._thresholds["slow_query_pct_critical"],
             )
             ms_sev, _ms_note = self._baseline.assess(
                 "max_execution_ms", float(max_ms),
-                static_warn=_THRESHOLDS["slow_query_ms_warning"],
-                static_crit=_THRESHOLDS["slow_query_ms_critical"],
+                static_warn=self._thresholds["slow_query_ms_warning"],
+                static_crit=self._thresholds["slow_query_ms_critical"],
             )
-            severity = worst_severity([count_sev, ms_sev])
+            severity = worst_severity([pct_sev, ms_sev])
         # Sort spills are always at least WARNING — spilling to disk indicates memory pressure
         if sort_spill_count > 0:
             severity = worst_severity([severity, HealthSeverity.WARNING])
@@ -524,11 +568,12 @@ class HealthCheckRunner:
         if count == 0:
             findings.append(f"No slow queries above {threshold}ms — profiler is active.")
         else:
-            count_note_str = f"  {_count_note}" if _count_note else ""
-            ms_note_str    = f"  {_ms_note}"    if _ms_note    else ""
+            pct_note_str = f"  {_pct_note}" if _pct_note else ""
+            ms_note_str  = f"  {_ms_note}"  if _ms_note  else ""
             findings.append(
-                f"{count} slow op(s){count_note_str}  ·  threshold: {threshold}ms  "
-                f"·  max: {max_ms}ms{ms_note_str}  ·  avg: {avg_ms:.0f}ms"
+                f"{count} slow op(s) ({slow_pct}% of {total_profiled} profiled){pct_note_str}"
+                f"  ·  threshold: {threshold}ms"
+                f"  ·  max: {max_ms}ms{ms_note_str}  ·  avg: {avg_ms:.0f}ms"
             )
             findings.append(
                 f"{collscan_count} of {count} op(s) used COLLSCAN (no index)  "
@@ -564,17 +609,39 @@ class HealthCheckRunner:
                     f"targeting ratio: {targeting_str}{sort_str}"
                 )
 
+        # BL-006: profiler findings
+        if profiler_off_dbs:
+            severity = worst_severity([severity, HealthSeverity.WARNING])
+            findings.append(
+                f"  Profiler disabled (level 0) on: {', '.join(profiler_off_dbs)} — "
+                f"slow query data may be incomplete or missing."
+            )
+        if profiler_high_ms_dbs:
+            severity = worst_severity([severity, HealthSeverity.WARNING])
+            findings.append(
+                f"  Profiler slowms > 100ms on: {', '.join(profiler_high_ms_dbs)} — "
+                f"fast queries not captured; lower slowms to ≤ 100 for better coverage."
+            )
+
+        signals = [
+            Signal("slow_query_pct",     slow_pct,         "%",       self._thresholds["slow_query_pct_warning"]),
+            Signal("slow_query_count",   count,            "queries"),   # info only — no threshold
+            Signal("total_profiled",     total_profiled,   "queries"),   # denominator context
+            Signal("collscan_count",      collscan_count,   "queries", 0),
+            Signal("sort_stage_count",    sort_stage_count, "queries", 0),
+            Signal("sort_spill_count",    sort_spill_count, "queries", 0),
+            Signal("max_execution_ms",    max_ms,           "ms",      self._thresholds["slow_query_ms_warning"]),
+            Signal("avg_execution_ms",    round(avg_ms, 1), "ms"),
+        ]
+        if profiler_off_dbs:
+            signals.append(Signal("profiler_disabled_dbs", len(profiler_off_dbs), "databases", 0))
+        if profiler_high_ms_dbs:
+            signals.append(Signal("profiler_high_slowms_dbs", len(profiler_high_ms_dbs), "databases", 0))
+
         return ReportSection(
             name="Query Performance",
             severity=severity,
-            signals=[
-                Signal("slow_query_count",   count,            "queries", _THRESHOLDS["slow_query_count_warning"]),
-                Signal("collscan_count",      collscan_count,   "queries", 0),
-                Signal("sort_stage_count",    sort_stage_count, "queries", 0),
-                Signal("sort_spill_count",    sort_spill_count, "queries", 0),
-                Signal("max_execution_ms",    max_ms,           "ms",      _THRESHOLDS["slow_query_ms_warning"]),
-                Signal("avg_execution_ms",    round(avg_ms, 1), "ms"),
-            ],
+            signals=signals,
             findings=findings,
         ), slow_queries
 
@@ -654,7 +721,36 @@ class HealthCheckRunner:
         unused = [i for i in all_indexes if i["ops"] == 0 and not i["is_id"]]
         used   = [i for i in all_indexes if i["ops"] > 0]
         custom = [i for i in all_indexes if not i["is_id"]]
-        severity = HealthSeverity.WARNING if unused else HealthSeverity.OK
+
+        # BL-007: detect redundant indexes (exact duplicates + left-prefix redundancies)
+        # Group by db+collection, then compare key patterns within each group.
+        redundant: List[Dict[str, Any]] = []
+        from collections import defaultdict
+        by_coll: Dict[str, List[Dict]] = defaultdict(list)
+        for idx in all_indexes:
+            if not idx["is_id"] and isinstance(idx.get("key"), dict):
+                by_coll[f"{idx['db']}.{idx['collection']}"].append(idx)
+        for fq_coll, idxs in by_coll.items():
+            key_lists = [list(idx["key"].keys()) for idx in idxs]
+            for i, idx_a in enumerate(idxs):
+                keys_a = key_lists[i]
+                for j, idx_b in enumerate(idxs):
+                    if i == j:
+                        continue
+                    keys_b = key_lists[j]
+                    # idx_a is a left-prefix of idx_b (or exact dup) → idx_a is redundant
+                    if len(keys_a) <= len(keys_b) and keys_b[:len(keys_a)] == keys_a:
+                        # Avoid double-reporting: only flag the shorter/equal one once
+                        if not any(r["name"] == idx_a["name"] and r["collection"] == idx_a["collection"]
+                                   for r in redundant):
+                            redundant.append({
+                                **idx_a,
+                                "covered_by": idx_b["name"],
+                                "fq_coll": fq_coll,
+                            })
+                        break
+
+        severity = HealthSeverity.WARNING if (unused or redundant) else HealthSeverity.OK
 
         findings: List[str] = []
         if unused:
@@ -678,6 +774,20 @@ class HealthCheckRunner:
                 f"{len({i['collection'] for i in all_indexes})} collection(s) are actively used."
             )
 
+        # BL-007: redundant index findings
+        if redundant:
+            findings.append(
+                f"{len(redundant)} redundant index(es) detected — each is a left-prefix of "
+                f"an existing compound index and can be safely dropped."
+            )
+            for idx in redundant[:10]:
+                key_str = ", ".join(f"{k}: {v}" for k, v in idx["key"].items())
+                findings.append(
+                    f'  {idx["fq_coll"]} → "{idx["name"]}" {{{key_str}}} is covered by "{idx["covered_by"]}"'
+                )
+            if len(redundant) > 10:
+                findings.append(f"  … and {len(redundant) - 10} more redundant index(es).")
+
         if used:
             top = sorted(used, key=lambda x: -x["ops"])[:3]
             findings.append(
@@ -686,14 +796,17 @@ class HealthCheckRunner:
                 )
             )
 
+        signals = [
+            Signal("total_indexes",     len(all_indexes), "indexes"),
+            Signal("unused_indexes",    len(unused),      "indexes", 0),
+            Signal("redundant_indexes", len(redundant),   "indexes", 0),
+            Signal("used_indexes",      len(used),        "indexes"),
+        ]
+
         return ReportSection(
             name="Unused Indexes",
             severity=severity,
-            signals=[
-                Signal("total_indexes",  len(all_indexes), "indexes"),
-                Signal("unused_indexes", len(unused),      "indexes", 0),
-                Signal("used_indexes",   len(used),        "indexes"),
-            ],
+            signals=signals,
             findings=findings,
         ), unused
 
@@ -747,15 +860,14 @@ class HealthCheckRunner:
         mem = ss.get("mem", {})
         rss_mb  = int(mem.get("resident", 0))
         # virtual MB omitted — always large on 64-bit, never actionable
-        signals.append(Signal("memory_resident_mb", rss_mb, "MB", _THRESHOLDS["memory_resident_warning_mb"]))
-        findings.append(f"Memory: {rss_mb:,} MB resident RAM")
-        if rss_mb >= _THRESHOLDS["memory_resident_critical_mb"]:
+        signals.append(Signal("memory_resident_mb", rss_mb, "MB", self._thresholds["memory_resident_warning_mb"]))
+        if rss_mb >= self._thresholds["memory_resident_critical_mb"]:
             severities.append(HealthSeverity.CRITICAL)
             findings.append(
                 f"  Resident memory ({rss_mb:,} MB) exceeds critical threshold "
-                f"({_THRESHOLDS['memory_resident_critical_mb']:,} MB) — review WiredTiger cache size and working set."
+                f"({self._thresholds['memory_resident_critical_mb']:,} MB) — review WiredTiger cache size and working set."
             )
-        elif rss_mb >= _THRESHOLDS["memory_resident_warning_mb"]:
+        elif rss_mb >= self._thresholds["memory_resident_warning_mb"]:
             severities.append(HealthSeverity.WARNING)
             findings.append(
                 f"  Resident memory ({rss_mb:,} MB) is elevated — monitor for growth."
@@ -768,7 +880,6 @@ class HealthCheckRunner:
         page_faults = int(extra.get("page_faults", 0))
         if page_faults > 0:
             signals.append(Signal("page_faults", page_faults, "faults (cumulative)"))
-            findings.append(f"Page faults: {page_faults:,} since restart")
 
         # ── WiredTiger cache ────────────────────────────────────────────────────
         wt_cache = ss.get("wiredTiger", {}).get("cache", {})
@@ -791,19 +902,15 @@ class HealthCheckRunner:
         cache_hit_pct = round(hit_ratio * 100, 1)
         cache_sev, cache_note = self._baseline.assess(
             "cache_hit_ratio_pct", cache_hit_pct,
-            static_warn=_THRESHOLDS["cache_hit_ratio_warning"] * 100,
-            static_crit=_THRESHOLDS["cache_hit_ratio_critical"] * 100,
+            static_warn=self._thresholds["cache_hit_ratio_warning"] * 100,
+            static_crit=self._thresholds["cache_hit_ratio_critical"] * 100,
             higher_is_worse=False,
         )
         severities.append(cache_sev)
         # Single card: hit ratio (the metric that matters) + used/max as context in finding
         signals.append(Signal("wt_cache_hit_ratio", cache_hit_pct, "%",
-                               _THRESHOLDS["cache_hit_ratio_warning"] * 100))
+                               self._thresholds["cache_hit_ratio_warning"] * 100))
         cache_note_str = f"  {cache_note}" if cache_note else ""
-        findings.append(
-            f"WiredTiger cache: {cache_hit_pct:.1f}% hit ratio{cache_note_str}"
-            f"  ·  {cache_used_mb} / {cache_max_mb} MB used ({cache_util_pct}%)"
-        )
         if cache_sev == HealthSeverity.CRITICAL:
             findings.append(
                 f"  Cache hit ratio is critically low ({cache_hit_pct:.1f}%) — "
@@ -811,7 +918,7 @@ class HealthCheckRunner:
             )
         elif cache_sev == HealthSeverity.WARNING:
             findings.append(
-                f"  Cache hit ratio ({cache_hit_pct:.1f}%) is below the {_THRESHOLDS['cache_hit_ratio_warning'] * 100:.0f}% "
+                f"  Cache hit ratio ({cache_hit_pct:.1f}%) is below the {self._thresholds['cache_hit_ratio_warning'] * 100:.0f}% "
                 f"warning threshold — consider increasing WiredTiger cache."
             )
 
@@ -824,14 +931,12 @@ class HealthCheckRunner:
         # BL-021: baseline-aware lock wait severity
         lock_sev, lock_note = self._baseline.assess(
             "lock_wait_pct", lock_wait_pct,
-            static_warn=_THRESHOLDS["lock_wait_pct_warning"],
-            static_crit=_THRESHOLDS["lock_wait_pct_critical"],
+            static_warn=self._thresholds["lock_wait_pct_warning"],
+            static_crit=self._thresholds["lock_wait_pct_critical"],
         )
         severities.append(lock_sev)
         signals.append(Signal("lock_wait_pct", lock_wait_pct, "%",
-                               _THRESHOLDS["lock_wait_pct_warning"]))
-        lock_note_str = f"  {lock_note}" if lock_note else ""
-        findings.append(f"Global lock wait: {lock_wait_pct:.2f}% of acquisitions waited{lock_note_str}")
+                               self._thresholds["lock_wait_pct_warning"]))
         if lock_sev == HealthSeverity.CRITICAL:
             findings.append(
                 f"  Lock contention is critically high ({lock_wait_pct:.1f}%) — "
@@ -840,7 +945,7 @@ class HealthCheckRunner:
         elif lock_sev == HealthSeverity.WARNING:
             findings.append(
                 f"  Lock wait percentage ({lock_wait_pct:.1f}%) exceeds warning threshold "
-                f"({_THRESHOLDS['lock_wait_pct_warning']}%) — watch for concurrency issues."
+                f"({self._thresholds['lock_wait_pct_warning']}%) — watch for concurrency issues."
             )
 
         # ── Cluster-level query targeting ratio ────────────────────────────────
@@ -859,17 +964,17 @@ class HealthCheckRunner:
         # BL-021: baseline-aware targeting ratio severity
         target_sev, target_note = self._baseline.assess(
             "cluster_targeting_ratio", targeting_ratio,
-            static_warn=_THRESHOLDS["query_targeting_warning"],
-            static_crit=_THRESHOLDS["query_targeting_critical"],
+            static_warn=self._thresholds["query_targeting_warning"],
+            static_crit=self._thresholds["query_targeting_critical"],
         )
         severities.append(target_sev)
         signals.append(Signal("cluster_targeting_ratio", targeting_ratio, "docs scanned per read",
-                               _THRESHOLDS["query_targeting_warning"]))
+                               self._thresholds["query_targeting_warning"]))
         target_note_str = f"  {target_note}" if target_note else ""
-        findings.append(
-            f"Index efficiency (cluster): {targeting_ratio:,.1f}× docs scanned per read{target_note_str}"
-            + (f"  ·  {scan_and_order:,} in-memory sort(s)" if scan_and_order else "")
-        )
+        if scan_and_order:
+            findings.append(f"{scan_and_order:,} in-memory sort operation(s) since restart")
+        if target_note_str:
+            findings.append(target_note_str.strip())
         if target_sev == HealthSeverity.CRITICAL:
             findings.append(
                 f"  Cluster targeting ratio is critically high ({targeting_ratio:,.0f}×) — "
@@ -878,7 +983,7 @@ class HealthCheckRunner:
         elif target_sev == HealthSeverity.WARNING:
             findings.append(
                 f"  Cluster targeting ratio ({targeting_ratio:,.1f}×) exceeds warning threshold "
-                f"({_THRESHOLDS['query_targeting_warning']}×) — check for missing or unused indexes."
+                f"({self._thresholds['query_targeting_warning']}×) — check for missing or unused indexes."
             )
 
         return ReportSection(
@@ -939,35 +1044,31 @@ class HealthCheckRunner:
             findings: List[str] = [f"Polled {len(hosts)} member(s):"] + member_lines
 
             signals.append(Signal("total_connections", total_connections, "connections",
-                                   _THRESHOLDS["connections_warning"]))
-            findings.append(f"Total connections (all members): {total_connections:,}")
-            if total_connections > _THRESHOLDS["connections_warning"]:
+                                   self._thresholds["connections_warning"]))
+            if total_connections > self._thresholds["connections_warning"]:
                 severities.append(HealthSeverity.WARNING)
                 findings.append(
                     f"  Connections ({total_connections:,}) exceed warning threshold "
-                    f"({_THRESHOLDS['connections_warning']:,})."
+                    f"({self._thresholds['connections_warning']:,})."
                 )
 
             if min_tickets_reads is not None:
                 signals.append(Signal("tickets_reads", min_tickets_reads, "tickets",
-                                       _THRESHOLDS["tickets_warning"]))
-                findings.append(f"WiredTiger read tickets (most constrained member): {min_tickets_reads:.0f}")
-                if min_tickets_reads < _THRESHOLDS["tickets_warning"]:
+                                       self._thresholds["tickets_warning"]))
+                if min_tickets_reads < self._thresholds["tickets_warning"]:
                     severities.append(HealthSeverity.WARNING)
                     findings.append(f"  Read ticket exhaustion risk ({min_tickets_reads:.0f} remaining).")
 
             if min_tickets_writes is not None:
                 signals.append(Signal("tickets_writes", min_tickets_writes, "tickets",
-                                       _THRESHOLDS["tickets_warning"]))
-                findings.append(f"WiredTiger write tickets (most constrained member): {min_tickets_writes:.0f}")
-                if min_tickets_writes < _THRESHOLDS["tickets_warning"]:
+                                       self._thresholds["tickets_warning"]))
+                if min_tickets_writes < self._thresholds["tickets_warning"]:
                     severities.append(HealthSeverity.WARNING)
                     findings.append(f"  Write ticket exhaustion risk ({min_tickets_writes:.0f} remaining).")
 
             signals.append(Signal("lock_queue_total", max_lock_queue, "operations",
-                                   _THRESHOLDS["lock_queue_warning"]))
-            findings.append(f"Global lock queue depth (peak): {max_lock_queue:.0f}")
-            if max_lock_queue > _THRESHOLDS["lock_queue_warning"]:
+                                   self._thresholds["lock_queue_warning"]))
+            if max_lock_queue > self._thresholds["lock_queue_warning"]:
                 severities.append(HealthSeverity.WARNING)
                 findings.append(
                     f"  Lock queue depth ({max_lock_queue:.0f}) exceeds threshold — "
@@ -1041,12 +1142,11 @@ class HealthCheckRunner:
             if cpu_user is not None:
                 cpu_user = round(cpu_user, 1)
                 signals.append(Signal("cpu_user_pct", cpu_user, "%",
-                                       _THRESHOLDS["cpu_user_pct_warning"]))
-                findings.append(f"MongoDB CPU user (primary, normalized): {cpu_user}%")
-                if cpu_user >= _THRESHOLDS["cpu_user_pct_warning"]:
+                                       self._thresholds["cpu_user_pct_warning"]))
+                if cpu_user >= self._thresholds["cpu_user_pct_warning"]:
                     severities.append(HealthSeverity.WARNING)
                     findings.append(
-                        f"  CPU user ({cpu_user}%) exceeds {_THRESHOLDS['cpu_user_pct_warning']}% — "
+                        f"  CPU user ({cpu_user}%) exceeds {self._thresholds['cpu_user_pct_warning']}% — "
                         f"check for expensive queries or background tasks."
                     )
 
@@ -1054,12 +1154,11 @@ class HealthCheckRunner:
             if iowait is not None:
                 iowait = round(iowait, 1)
                 signals.append(Signal("cpu_iowait_pct", iowait, "%",
-                                       _THRESHOLDS["cpu_iowait_pct_warning"]))
-                findings.append(f"System CPU iowait (primary): {iowait}%")
-                if iowait >= _THRESHOLDS["cpu_iowait_pct_warning"]:
+                                       self._thresholds["cpu_iowait_pct_warning"]))
+                if iowait >= self._thresholds["cpu_iowait_pct_warning"]:
                     severities.append(HealthSeverity.WARNING)
                     findings.append(
-                        f"  I/O wait ({iowait}%) above {_THRESHOLDS['cpu_iowait_pct_warning']}% — "
+                        f"  I/O wait ({iowait}%) above {self._thresholds['cpu_iowait_pct_warning']}% — "
                         f"disk subsystem may be a bottleneck."
                     )
 
@@ -1068,35 +1167,31 @@ class HealthCheckRunner:
             if mem_used is not None and mem_avail is not None and (mem_used + mem_avail) > 0:
                 mem_used_pct = round(mem_used / (mem_used + mem_avail) * 100, 1)
                 signals.append(Signal("system_memory_used_pct", mem_used_pct, "%",
-                                       _THRESHOLDS["system_memory_used_pct_warning"]))
-                findings.append(f"System memory used (primary): {mem_used_pct}%")
-                if mem_used_pct >= _THRESHOLDS["system_memory_used_pct_warning"]:
+                                       self._thresholds["system_memory_used_pct_warning"]))
+                if mem_used_pct >= self._thresholds["system_memory_used_pct_warning"]:
                     severities.append(HealthSeverity.WARNING)
                     findings.append(
                         f"  System memory usage ({mem_used_pct}%) above "
-                        f"{_THRESHOLDS['system_memory_used_pct_warning']}% — risk of OS swapping."
+                        f"{self._thresholds['system_memory_used_pct_warning']}% — risk of OS swapping."
                     )
 
             partition = self._om.get_disk_name(primary["id"])
             if partition:
                 disk_meas = self._om.get_disk_measurements(primary["id"], partition, DISK_METRICS)
+                findings.append(f"Disk partition: {partition}")
                 iops_write = disk_meas.get("DISK_PARTITION_IOPS_WRITE")
                 if iops_write is not None:
                     signals.append(Signal("disk_iops_write", round(iops_write, 1), "IOPS"))
-                    findings.append(
-                        f"Disk write IOPS (primary, partition {partition}): {iops_write:.1f}"
-                    )
                 lat_write = disk_meas.get("DISK_PARTITION_LATENCY_WRITE")
                 if lat_write is not None:
                     lat_write = round(lat_write, 2)
                     signals.append(Signal("disk_write_latency_ms", lat_write, "ms",
-                                           _THRESHOLDS["disk_write_latency_warning_ms"]))
-                    findings.append(f"Disk write latency (primary): {lat_write}ms")
-                    if lat_write >= _THRESHOLDS["disk_write_latency_warning_ms"]:
+                                           self._thresholds["disk_write_latency_warning_ms"]))
+                    if lat_write >= self._thresholds["disk_write_latency_warning_ms"]:
                         severities.append(HealthSeverity.WARNING)
                         findings.append(
                             f"  Disk write latency ({lat_write}ms) above "
-                            f"{_THRESHOLDS['disk_write_latency_warning_ms']}ms — "
+                            f"{self._thresholds['disk_write_latency_warning_ms']}ms — "
                             f"investigate disk I/O saturation."
                         )
             else:
@@ -1161,7 +1256,44 @@ class HealthCheckRunner:
     ) -> List[Recommendation]:
         recs: List[Recommendation] = []
 
-        # ── HIGH: create missing indexes for slow full-scan collections ──────────
+        # BL-089: derive recommendation priority from section consequence tier.
+        # Prevents P3/P4 section issues (index, observability) from appearing as "P0".
+        from utils.html_reporter import SECTION_TIER
+
+        def _rec_priority(section_name: str, is_critical: bool = True) -> str:
+            """Return recommendation priority label = section consequence tier (P0–P4).
+
+            Per config/scoring_tiers.md §4: priority is the tier of the section
+            that produced the finding. A Replication breach → P0. Missing Indexes → P3.
+            The is_critical param is kept for call-site compatibility but not used.
+            """
+            return SECTION_TIER.get(section_name, "P4")
+
+        # Build flat signal → (value, threshold, section_name) lookup used by rules below
+        _sigs: Dict[str, Any] = {}
+        _sig_section: Dict[str, str] = {}
+        for _s in sections:
+            for _sig in _s.signals:
+                _sigs[_sig.name] = _sig
+                _sig_section[_sig.name] = _s.name
+
+        def _val(name: str):
+            """Return (value, threshold) for a named signal, or (None, None)."""
+            sig = _sigs.get(name)
+            if sig is None:
+                return None, None
+            return sig.value, sig.threshold
+
+        def _breached_high(name: str) -> bool:
+            v, t = _val(name)
+            return isinstance(v, (int, float)) and isinstance(t, (int, float)) and v > t
+
+        def _breached_low(name: str) -> bool:
+            v, t = _val(name)
+            return isinstance(v, (int, float)) and isinstance(t, (int, float)) and v < t
+
+        # ── MEDIUM: create missing indexes for slow full-scan collections ─────────
+        # Missing Indexes is a P3 section (performance, not durability) → medium priority.
         # Group all slow queries by collection so we can pick the best representative
         # (prefer queries that have extractable filter fields — aggregate $indexStats
         #  calls appear as op=command with no filter and must be skipped)
@@ -1176,10 +1308,10 @@ class HealthCheckRunner:
             # fall back to worst overall if none have extractable fields.
             full_scan_qs = [
                 q for q in qs
-                if (q.get("docs_examined", 0) >= _THRESHOLDS["full_scan_examined_min"]
+                if (q.get("docs_examined", 0) >= self._thresholds["full_scan_examined_min"]
                     and (q.get("docs_returned", 0) / q["docs_examined"]
                          if q.get("docs_examined") else 1.0)
-                    <= _THRESHOLDS["full_scan_selectivity_max"])
+                    <= self._thresholds["full_scan_selectivity_max"])
             ]
             if not full_scan_qs:
                 continue  # no full-scan evidence for this collection
@@ -1232,7 +1364,7 @@ class HealthCheckRunner:
                 f"; has_sort_stage=true" if has_sort else ""
             )
             recs.append(Recommendation(
-                priority="high",
+                priority=_rec_priority("Missing Indexes"),  # P3 → medium
                 collection=fq_coll,
                 action=action,
                 evidence=(
@@ -1242,20 +1374,255 @@ class HealthCheckRunner:
                 confidence=confidence,
             ))
 
-        # ── MEDIUM: drop unused indexes (structured data from _section_index_usage) ──
+        # ── HIGH: short oplog window — replication sync risk (P0 section) ──────────
+        for section in sections:
+            for sig in section.signals:
+                if sig.name == "oplog_window_hours" and sig.threshold is not None:
+                    if isinstance(sig.value, (int, float)) and sig.value < sig.threshold:
+                        recs.append(Recommendation(
+                            priority=_rec_priority("Replication Health"),  # P0 → high
+                            collection="cluster",
+                            action=(
+                                f"Increase oplog size to extend the window above {sig.threshold}h: "
+                                f"db.adminCommand({{replSetResizeOplog: 1, size: 51200}})  "
+                                f"// run on the PRIMARY; current window is {sig.value:.1f}h"
+                            ),
+                            evidence=(
+                                f"oplog_window_hours={sig.value:.1f}h (threshold: {sig.threshold}h) — "
+                                f"a secondary falling more than {sig.value * 60:.0f} min behind will require a full resync"
+                            ),
+                            confidence="high",
+                        ))
+
+        # ── MEDIUM: profiler disabled — slow queries not captured (P3 section) ──
+        for section in sections:
+            for sig in section.signals:
+                if sig.name == "profiler_disabled_dbs" and isinstance(sig.value, int) and sig.value > 0:
+                    recs.append(Recommendation(
+                        priority=_rec_priority("Query Performance"),  # P3 → medium
+                        collection="cluster",
+                        action=(
+                            "Enable profiler on each disabled database: "
+                            "db.setProfilingLevel(1, {slowms: 100})  "
+                            "// run inside each affected database"
+                        ),
+                        evidence=(
+                            f"{sig.value} database(s) have profiler disabled (level 0) — "
+                            "slow queries are not being captured, masking performance problems"
+                        ),
+                        confidence="high",
+                    ))
+
+        # ── LOW: drop unused indexes (P4 section — observability, no operational risk) ──
         for idx in unused_indexes:
             db_name    = idx["db"]
             coll_name  = idx["collection"]
             index_name = idx["name"]
             since      = idx.get("since", "last restart") or "last restart"
             recs.append(Recommendation(
-                priority="medium",
+                priority=_rec_priority("Unused Indexes"),  # P4 → low
                 collection=f"{db_name}.{coll_name}",
                 action=f'db.{coll_name}.dropIndex("{index_name}")',
                 evidence=(
                     f'Index "{index_name}" on {db_name}.{coll_name} has 0 accesses since {since} — '
                     f"consuming write overhead and storage with no read benefit"
                 ),
+                confidence="medium",
+            ))
+
+        # ── HIGH: disk space running low (Storage & Capacity P1) ─────────────
+        if _breached_high("filesystem_disk_used_pct"):
+            v, t = _val("filesystem_disk_used_pct")
+            recs.append(Recommendation(
+                priority=_rec_priority("Storage & Capacity"),  # P1 → high
+                collection="cluster",
+                action=(
+                    "Free disk space immediately: remove old report files, compact collections "
+                    "(db.runCommand({compact: '<collection>'})), or expand the volume. "
+                    "Consider enabling TTL indexes to auto-expire old documents."
+                ),
+                evidence=f"filesystem_disk_used_pct={v:.1f}% exceeds {t}% threshold — mongod will stop accepting writes when disk is full",
+                confidence="high",
+            ))
+
+        # ── HIGH: WiredTiger cache hit ratio too low (Operations P1) ────────
+        if _breached_low("wt_cache_hit_ratio"):
+            v, t = _val("wt_cache_hit_ratio")
+            recs.append(Recommendation(
+                priority=_rec_priority("Operations"),  # P1 → high
+                collection="cluster",
+                action=(
+                    "Increase WiredTiger cache size in mongod.conf: "
+                    "storage.wiredTiger.engineConfig.cacheSizeGB: <N>  "
+                    "// set to ~50–60% of available RAM; current hit ratio indicates working set exceeds cache"
+                ),
+                evidence=f"wt_cache_hit_ratio={v:.1f}% is below the {t}% threshold — data reads are bypassing the cache and hitting disk",
+                confidence="high",
+            ))
+
+        # ── HIGH: resident memory high — OOM or swap risk (Operations P1) ────
+        if _breached_high("memory_resident_mb"):
+            v, t = _val("memory_resident_mb")
+            recs.append(Recommendation(
+                priority=_rec_priority("Operations"),  # P1 → high
+                collection="cluster",
+                action=(
+                    "Reduce memory pressure: lower WiredTiger cache "
+                    "(storage.wiredTiger.engineConfig.cacheSizeGB), add indexes to shrink "
+                    "working set, or add RAM to the host."
+                ),
+                evidence=f"memory_resident_mb={v:.0f} MB exceeds {t:.0f} MB threshold — risk of OS swapping which causes severe latency spikes",
+                confidence="high",
+            ))
+
+        # ── HIGH: global lock wait % elevated (Operations P1) ────────────────
+        if _breached_high("lock_wait_pct"):
+            v, t = _val("lock_wait_pct")
+            recs.append(Recommendation(
+                priority=_rec_priority("Operations"),  # P1 → high
+                collection="cluster",
+                action=(
+                    "Investigate lock contention: db.currentOp({waitingForLock: true}) "
+                    "to find blocking operations; review long-running writes, "
+                    "large in-place updates, and foreground index builds."
+                ),
+                evidence=f"lock_wait_pct={v:.1f}% exceeds {t}% threshold — operations are spending {v:.1f}% of time waiting for locks",
+                confidence="high",
+            ))
+
+        # ── P1: cluster targeting ratio high — signal lives in Operations (P1 tier) ──────────
+        # Must fire even when per-collection createIndex recs exist: those address specific
+        # collections; this one flags the cluster-wide scan problem that drives the Operations
+        # CRITICAL and its score penalty, so the Action Plan has a P1 action to match.
+        if _breached_high("cluster_targeting_ratio"):
+            v, t = _val("cluster_targeting_ratio")
+            recs.append(Recommendation(
+                priority=_rec_priority("Operations"),  # signal is in Operations → P1
+                collection="cluster",
+                action=(
+                    f"Cluster is scanning {v:.1f} documents per result returned ({t}× threshold). "
+                    "Identify the heaviest scanning collections in Query Performance below and add indexes on frequently filtered fields to eliminate full collection scans."
+                ),
+                evidence=f"cluster_targeting_ratio={v:.1f}× (critical threshold: {t}×) — sustained full scans cause memory pressure and write stalls",
+                confidence="medium",
+            ))
+
+        # ── MEDIUM: sort spill to disk (Query Performance P3) ───────────────
+        if _breached_high("sort_spill_count"):
+            v, _ = _val("sort_spill_count")
+            recs.append(Recommendation(
+                priority=_rec_priority("Query Performance"),  # P3 → medium
+                collection="cluster",
+                action=(
+                    "Add indexes that cover sort fields to eliminate in-memory sorts, "
+                    "or set allowDiskUseByDefault: true in mongod.conf for large aggregation sorts. "
+                    "Review queries with sort stages in the profiler."
+                ),
+                evidence=f"sort_spill_count={v} — {v} sort operation(s) exceeded the in-memory sort buffer and spilled to disk, degrading throughput",
+                confidence="high",
+            ))
+
+        # ── LOW: profiler slowms threshold too high (Query Performance P3, warning-level) ─
+        if _breached_high("profiler_high_slowms_dbs"):
+            v, _ = _val("profiler_high_slowms_dbs")
+            recs.append(Recommendation(
+                priority=_rec_priority("Query Performance", is_critical=False),  # P3 warning → low
+                collection="cluster",
+                action=(
+                    "Lower the profiler slowms threshold to capture more slow queries: "
+                    "db.setProfilingLevel(1, {slowms: 50})  // run on each affected database"
+                ),
+                evidence=f"{v} database(s) have profiler enabled but slowms threshold is too high — queries between 50–100ms are not being captured",
+                confidence="medium",
+            ))
+
+        # ── MEDIUM: connection count approaching limit (Connections & Concurrency P2) ──
+        if _breached_high("total_connections"):
+            v, t = _val("total_connections")
+            recs.append(Recommendation(
+                priority=_rec_priority("Connections & Concurrency"),  # P2 → medium
+                collection="cluster",
+                action=(
+                    "Review connection pool settings: reduce maxPoolSize in application drivers, "
+                    "enable connection pooling if not already used, "
+                    "or run db.currentOp() to identify idle long-lived connections."
+                ),
+                evidence=f"total_connections={v:.0f} exceeds {t:.0f} threshold — high connection count increases memory overhead and scheduling pressure",
+                confidence="medium",
+            ))
+
+        # ── HIGH: read ticket exhaustion (Operations P1) ─────────────────────
+        if _breached_low("tickets_reads"):
+            v, t = _val("tickets_reads")
+            recs.append(Recommendation(
+                priority=_rec_priority("Operations"),  # P1 → high
+                collection="cluster",
+                action=(
+                    "Investigate long-running read operations: db.currentOp({op: 'query'}) "
+                    "to find queries holding tickets. Add indexes to reduce scan time. "
+                    "If needed: db.adminCommand({setParameter: 1, wiredTigerConcurrentReadTransactions: 256})"
+                ),
+                evidence=f"tickets_reads={v:.0f} remaining (threshold: {t:.0f}) — WiredTiger read concurrency slots are nearly exhausted, new reads will queue",
+                confidence="high",
+            ))
+
+        # ── HIGH: write ticket exhaustion (Operations P1) ────────────────────
+        if _breached_low("tickets_writes"):
+            v, t = _val("tickets_writes")
+            recs.append(Recommendation(
+                priority=_rec_priority("Operations"),  # P1 → high
+                collection="cluster",
+                action=(
+                    "Investigate long-running write operations: db.currentOp({op: {$in: ['insert','update','remove']}}) "
+                    "to find writes holding tickets. Batch bulk writes, reduce document size, "
+                    "or add write concern w:0 for non-critical writes."
+                ),
+                evidence=f"tickets_writes={v:.0f} remaining (threshold: {t:.0f}) — WiredTiger write concurrency slots are nearly exhausted, new writes will queue",
+                confidence="high",
+            ))
+
+        # ── MEDIUM: high I/O wait (Infrastructure P2) ────────────────────────
+        if _breached_high("cpu_iowait_pct"):
+            v, t = _val("cpu_iowait_pct")
+            recs.append(Recommendation(
+                priority=_rec_priority("Infrastructure"),  # P2 → medium
+                collection="cluster",
+                action=(
+                    "Reduce I/O pressure: add indexes to prevent collection scans, "
+                    "increase WiredTiger cache to keep working set in memory, "
+                    "or upgrade to faster storage (NVMe SSD)."
+                ),
+                evidence=f"cpu_iowait_pct={v:.1f}% exceeds {t}% threshold — CPU is spending {v:.1f}% of time waiting for disk I/O",
+                confidence="medium",
+            ))
+
+        # ── MEDIUM: system memory near exhaustion (Infrastructure P2) ────────
+        if _breached_high("system_memory_used_pct"):
+            v, t = _val("system_memory_used_pct")
+            recs.append(Recommendation(
+                priority=_rec_priority("Infrastructure"),  # P2 → medium
+                collection="cluster",
+                action=(
+                    "Prevent OS swapping: reduce WiredTiger cache size "
+                    "(storage.wiredTiger.engineConfig.cacheSizeGB) to leave headroom for the OS, "
+                    "or add RAM. MongoDB performance degrades severely when the OS starts swapping."
+                ),
+                evidence=f"system_memory_used_pct={v:.1f}% exceeds {t}% threshold — system is near memory exhaustion; swapping will cause severe latency spikes",
+                confidence="high",
+            ))
+
+        # ── MEDIUM: disk write latency high (Infrastructure P2) ─────────────
+        if _breached_high("disk_write_latency_ms"):
+            v, t = _val("disk_write_latency_ms")
+            recs.append(Recommendation(
+                priority=_rec_priority("Infrastructure"),  # P2 → medium
+                collection="cluster",
+                action=(
+                    "Investigate disk I/O saturation: check iostat/iotop for write pressure, "
+                    "reduce write concurrency, enable journalCompressor: snappy in mongod.conf, "
+                    "or upgrade to faster storage."
+                ),
+                evidence=f"disk_write_latency_ms={v:.1f}ms exceeds {t}ms threshold — elevated write latency increases write concern acknowledgement times",
                 confidence="medium",
             ))
 

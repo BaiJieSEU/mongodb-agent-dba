@@ -87,7 +87,9 @@ def render_markdown(report: HealthCheckReport) -> str:
     if not report.recommendations:
         lines += ["No actions required.", ""]
     else:
-        for i, rec in enumerate(report.recommendations, 1):
+        _pri_order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3, "P4": 4}
+        sorted_recs = sorted(report.recommendations, key=lambda r: _pri_order.get(r.priority, 9))
+        for i, rec in enumerate(sorted_recs, 1):
             priority_label = rec.priority.upper()
             confidence_label = rec.confidence.upper()
             lines += [

@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class IntelligentAgenticDBAAgent:
     """Intelligent AI Agent with semantic understanding and MCP-based tool execution"""
 
-    def __init__(self, config: AppConfig, mongo_manager: MongoDBManager):
+    def __init__(self, config: AppConfig, mongo_manager: MongoDBManager, cluster=None):
         self.config = config
         self.mongo_manager = mongo_manager
 
@@ -31,8 +31,16 @@ class IntelligentAgenticDBAAgent:
             database_name="agent_memory",
         )
 
+        # Cluster targeting — defaults to first configured cluster
+        if cluster is not None:
+            self._cluster_uri = cluster.uri
+            self._cluster_name = cluster.name
+        else:
+            self._cluster_uri = config.mongodb.monitored_cluster
+            self._cluster_name = ""
+
         # MCP server targets the monitored cluster (port 27018)
-        self._mcp_uri = config.mongodb.monitored_cluster
+        self._mcp_uri = self._cluster_uri
 
         # Tool registry — no more Python class handlers, execution goes via MCP
         self.tools = {
@@ -254,9 +262,7 @@ Guidelines:
 
     def _tool_list_collections(self, params: Dict[str, Any]) -> Dict[str, Any]:
         db = params.get("database", "testdb")
-        # MCP returns one text block per collection: "Name: <collection>"
-        blocks = self._mcp.call_tool("list-collections", {"database": db})
-        collections = [b.replace("Name: ", "").strip() for b in blocks if b.startswith("Name:")]
+        collections = self._mcp.list_collections(db)
         return {
             "success": True,
             "tool": "list_collections",
@@ -265,8 +271,7 @@ Guidelines:
         }
 
     def _tool_list_databases(self) -> Dict[str, Any]:
-        blocks = self._mcp.call_tool("list-databases", {})
-        databases = [b.replace("Name: ", "").strip() for b in blocks if b.startswith("Name:")]
+        databases = self._mcp.list_databases()
         return {
             "success": True,
             "tool": "list_databases",
@@ -279,34 +284,24 @@ Guidelines:
         threshold_ms = params.get("threshold_ms", self.config.agent.slow_query_threshold_ms)
         limit = params.get("limit", self.config.agent.max_queries_to_analyze)
 
-        # MCP returns: first block = header, rest = JSON docs
-        blocks = self._mcp.call_tool("find", {
-            "database": db,
-            "collection": "system.profile",
-            "filter": {
-                "millis": {"$gte": threshold_ms},
-                "op": {"$nin": ["getmore", "killCursors"]},
-            },
-            "sort": {"ts": -1},
-            "limit": limit,
-        })
-
+        docs = self._mcp.find(
+            db, "system.profile",
+            filter={"millis": {"$gte": threshold_ms}, "op": {"$nin": ["getmore", "killCursors"]}},
+            sort={"ts": -1},
+            limit=limit,
+        )
         queries = []
-        for block in blocks[1:]:  # skip header block
-            try:
-                doc = json.loads(block)
-                ns = doc.get("ns", "")
-                collection = ns.split(".", 1)[-1] if "." in ns else ns
-                queries.append({
-                    "collection": collection,
-                    "query": doc.get("query", doc.get("command", {})),
-                    "execution_time_ms": doc.get("millis", 0),
-                    "docs_examined": doc.get("docsExamined", 0),
-                    "docs_returned": doc.get("nreturned", 0),
-                    "operation": doc.get("op", "query"),
-                })
-            except (json.JSONDecodeError, AttributeError):
-                continue
+        for doc in docs:
+            ns = doc.get("ns", "")
+            collection = ns.split(".", 1)[-1] if "." in ns else ns
+            queries.append({
+                "collection": collection,
+                "query": doc.get("query", doc.get("command", {})),
+                "execution_time_ms": doc.get("millis", 0),
+                "docs_examined": doc.get("docsExamined", 0),
+                "docs_returned": doc.get("nreturned", 0),
+                "operation": doc.get("op", "query"),
+            })
 
         return {
             "success": True,
@@ -320,15 +315,13 @@ Guidelines:
         collection = params.get("collection", "users")
         filter_query = params.get("filter", {})
 
-        blocks = self._mcp.call_tool("explain", {
-            "database": db,
-            "collection": collection,
-            "method": [{"name": "find", "arguments": {"filter": filter_query}}],
-        })
+        plan = self._mcp.explain(
+            db, collection, [{"name": "find", "arguments": {"filter": filter_query}}]
+        )
         return {
             "success": True,
             "tool": "explain_query",
-            "data": "\n".join(blocks),
+            "data": plan,
             "summary": f"Execution plan retrieved for '{collection}'",
         }
 
@@ -336,11 +329,7 @@ Guidelines:
         db = params.get("database", "testdb")
         collection = params.get("collection", "users")
 
-        blocks = self._mcp.call_tool("collection-indexes", {
-            "database": db,
-            "collection": collection,
-        })
-        indexes = [b for b in blocks if b.startswith("Field:")]
+        indexes = self._mcp.collection_indexes(db, collection)
         return {
             "success": True,
             "tool": "check_indexes",
@@ -369,6 +358,7 @@ Guidelines:
                 user_query=user_input,
                 intent_category=intent["category"],
                 database_analyzed=intent.get("database_target", "testdb"),
+                cluster_uri=self._cluster_uri,
                 tools_used=[r.get("tool", "unknown") for r in tool_results],
                 findings={
                     "tool_results": tool_results,
@@ -395,6 +385,7 @@ Guidelines:
                             issue_id=f"perf_{qhash}",
                             database=intent.get("database_target", "testdb"),
                             collection=qdata.get("collection", ""),
+                            cluster_uri=self._cluster_uri,
                             query_pattern=str(qdata.get("query", {}))[:200],
                             query_hash=qhash,
                             first_detected=datetime.utcnow(),
