@@ -66,6 +66,10 @@ _THRESHOLDS_DEFAULTS = {
     "lock_wait_pct_critical": 20.0,
     "query_targeting_warning": 10.0,
     "query_targeting_critical": 100.0,
+    "replication_lag_warning_sec": 10,
+    "replication_lag_critical_sec": 60,
+    "long_running_op_warning_sec": 5,
+    "long_running_op_critical_sec": 60,
     "memory_resident_warning_mb": 4096,
     "memory_resident_critical_mb": 8192,
     "connections_warning": 500,
@@ -351,43 +355,95 @@ class HealthCheckRunner:
                 higher_is_worse=False,
             )
 
-        # Enrich with OM member states + per-secondary lag if available
-        om_host_map: Dict[str, Dict] = {}   # hostname → OM host doc
-        om_lag_map: Dict[str, Optional[float]] = {}  # hostname → lag seconds
+        # BL-094: replSetGetStatus — per-member health, state, and replication lag
+        # Available via direct PyMongo (clusterMonitor role); not available via MCP.
+        rs_status = self._mongo.get_rs_status() if self._mongo else None
+        rs_status_members: List[Dict] = rs_status.get("members", []) if rs_status else []
+
+        members_up   = sum(1 for m in rs_status_members if int(m.get("health", 0)) == 1)
+        members_down = sum(1 for m in rs_status_members if int(m.get("health", 0)) == 0)
+
+        # Compute per-secondary lag (primary optimeDate – secondary optimeDate)
+        primary_optime = None
+        for m in rs_status_members:
+            if m.get("stateStr") == "PRIMARY":
+                primary_optime = m.get("optimeDate")
+                break
+
+        lag_per_member: List[tuple] = []  # (name, lag_sec)
+        for m in rs_status_members:
+            if m.get("stateStr") not in ("PRIMARY", "ARBITER") and int(m.get("health", 0)) == 1:
+                member_optime = m.get("optimeDate")
+                if primary_optime and member_optime:
+                    lag_sec = max(0.0, (primary_optime - member_optime).total_seconds())
+                    lag_per_member.append((m.get("name", "?"), lag_sec))
+
+        max_lag_sec = max((lag for _, lag in lag_per_member), default=0.0)
+
+        # Severity: merge lag + oplog severity
+        lag_sev = HealthSeverity.OK
+        if max_lag_sec >= self._thresholds["replication_lag_critical_sec"]:
+            lag_sev = HealthSeverity.CRITICAL
+        elif max_lag_sec >= self._thresholds["replication_lag_warning_sec"]:
+            lag_sev = HealthSeverity.WARNING
+        if members_down > 0:
+            lag_sev = worst_severity([lag_sev, HealthSeverity.WARNING])
+        severity = worst_severity([severity, lag_sev])
+
+        # Enrich with OM member states (still used for typeName if OM configured)
+        om_host_map: Dict[str, Dict] = {}
         if self._om is not None:
             try:
                 for h in self._om.get_hosts():
                     hn = h.get("hostname", "")
                     if hn:
                         om_host_map[hn] = h
-                for hn, h in om_host_map.items():
-                    if h.get("typeName", "").upper() == "REPLICA_SECONDARY":
-                        meas = self._om.get_host_measurements(
-                            h["id"], ["OPLOG_SLAVE_LAG_MASTER_TIME"]
-                        )
-                        om_lag_map[hn] = meas.get("OPLOG_SLAVE_LAG_MASTER_TIME")
             except Exception as exc:
                 logger.warning("OM replication enrichment failed: %s", exc)
 
         findings: List[str] = []
         if is_replica_set:
             findings.append(f"Replica set: {rs_name}  ·  {len(members)} configured member(s)")
-            for m in members:
-                host = m.get("host", "?")
-                pri  = m.get("priority", "?")
-                hidden = "  [hidden]" if m.get("hidden") else ""
-                hn_only = host.split(":")[0]
-                om_host = om_host_map.get(hn_only, {})
-                type_name = om_host.get("typeName", "")
-                state_str = f"  [{type_name}]" if type_name else ""
-                lag = om_lag_map.get(hn_only)
-                lag_str = f"  lag {lag:.1f}s" if lag is not None else ""
-                findings.append(f"  {host}  priority={pri}{hidden}{state_str}{lag_str}")
-            if not om_host_map:
+            if rs_status_members:
+                for m in rs_status_members:
+                    name  = m.get("name", "?")
+                    state = m.get("stateStr", "UNKNOWN")
+                    health_flag = "✓" if int(m.get("health", 0)) == 1 else "✗ DOWN"
+                    lag_entry = next((lag for n, lag in lag_per_member if n == name), None)
+                    lag_str = f"  lag {lag_entry:.1f}s" if lag_entry is not None else ""
+                    findings.append(f"  {name}  [{state}]  {health_flag}{lag_str}")
+            else:
+                for m in members:
+                    host = m.get("host", "?")
+                    pri  = m.get("priority", "?")
+                    hidden = "  [hidden]" if m.get("hidden") else ""
+                    hn_only = host.split(":")[0]
+                    om_host = om_host_map.get(hn_only, {})
+                    type_name = om_host.get("typeName", "")
+                    state_str = f"  [{type_name}]" if type_name else ""
+                    findings.append(f"  {host}  priority={pri}{hidden}{state_str}")
                 findings.append(
                     "Member states not available — set OM_API_PUBLIC_KEY / OM_API_PRIVATE_KEY "
-                    "to see PRIMARY/SECONDARY/DOWN per member."
+                    "or grant clusterMonitor role to see PRIMARY/SECONDARY/DOWN per member."
                 )
+
+            if members_down > 0:
+                findings.append(
+                    f"  {members_down} member(s) reported as DOWN — cluster may be degraded."
+                )
+            if lag_per_member:
+                if max_lag_sec >= self._thresholds["replication_lag_critical_sec"]:
+                    findings.append(
+                        f"  Max replication lag ({max_lag_sec:.1f}s) exceeds critical threshold "
+                        f"({self._thresholds['replication_lag_critical_sec']}s) — "
+                        f"secondary(ies) at risk of oplog gap."
+                    )
+                elif max_lag_sec >= self._thresholds["replication_lag_warning_sec"]:
+                    findings.append(
+                        f"  Replication lag ({max_lag_sec:.1f}s) exceeds warning threshold "
+                        f"({self._thresholds['replication_lag_warning_sec']}s)."
+                    )
+
         if oplog_window_hours is not None:
             note_str = f"  {_oplog_note}" if _oplog_note else ""
             findings.append(f"Oplog window: {oplog_window_hours}h{note_str}")
@@ -402,6 +458,12 @@ class HealthCheckRunner:
         if oplog_window_hours is not None:
             signals.append(Signal("oplog_window_hours", oplog_window_hours, "hours",
                                   self._thresholds["oplog_window_warning_hours"]))
+        if rs_status_members:
+            signals.append(Signal("members_up",   members_up,   "members"))
+            signals.append(Signal("members_down", members_down, "members", 0))
+        if lag_per_member:
+            signals.append(Signal("replication_lag_max_sec", round(max_lag_sec, 1), "s",
+                                  self._thresholds["replication_lag_warning_sec"]))
 
         return ReportSection(
             name="Replication Health",
@@ -440,8 +502,13 @@ class HealthCheckRunner:
 
         coll_stats.sort(key=lambda x: -x["size_mb"])
 
+        # BL-095: index-to-data ratio
+        index_to_data_ratio = round(total_index_mb / total_data_mb, 2) if total_data_mb > 0 else 0.0
+
         # Severity based on MongoDB data size, not filesystem (filesystem is in Server Health)
         severity = HealthSeverity.OK
+        if index_to_data_ratio > 2.0 and total_data_mb > 1.0:
+            severity = HealthSeverity.WARNING
 
         # Only surface storage findings when there is an anomaly worth investigating.
         # Raw size rankings with no threshold context add noise, not signal.
@@ -460,13 +527,19 @@ class HealthCheckRunner:
                         f"{s['db']}.{s['collection']}: avg document size {s['avg_bytes']:,} bytes — "
                         f"consider schema review or projection to reduce working-set pressure."
                     )
+        if index_to_data_ratio > 2.0 and total_data_mb > 1.0:
+            findings.append(
+                f"Index size ({round(total_index_mb, 1)} MB) is {index_to_data_ratio}× data size "
+                f"({round(total_data_mb, 1)} MB) — review unused indexes (§7 Unused Indexes)."
+            )
 
         return ReportSection(
             name="Storage & Capacity",
             severity=severity,
             signals=[
-                Signal("mongodb_data_mb",  round(total_data_mb, 1),  "MB"),
-                Signal("mongodb_index_mb", round(total_index_mb, 1), "MB"),
+                Signal("mongodb_data_mb",       round(total_data_mb, 1),    "MB"),
+                Signal("mongodb_index_mb",      round(total_index_mb, 1),   "MB"),
+                Signal("index_to_data_ratio",   index_to_data_ratio,        "×", 2.0),
             ],
             findings=findings,
         )
@@ -478,17 +551,21 @@ class HealthCheckRunner:
         limit     = self.config.agent.max_queries_to_analyze
 
         # BL-006: check profiler configuration for each user database
+        # BL-100: also capture slowms values for explicit signal
         profiler_off_dbs:      List[str] = []
         profiler_high_ms_dbs:  List[str] = []
+        profiler_slowms_values: List[int] = []
         for db in user_dbs:
             try:
                 status = self._mongo.monitored_cluster[db].command({"profile": -1})
                 level  = status.get("was", status.get("level", -1))
-                slowms = status.get("slowms", 0)
+                slowms = int(status.get("slowms", 0))
                 if level == 0:
                     profiler_off_dbs.append(db)
                 elif slowms > 100:
                     profiler_high_ms_dbs.append(db)
+                if level != 0:
+                    profiler_slowms_values.append(slowms)
             except Exception as exc:
                 logger.warning("BL-006: profiler status unavailable for %s: %s", db, exc)
 
@@ -623,6 +700,9 @@ class HealthCheckRunner:
                 f"fast queries not captured; lower slowms to ≤ 100 for better coverage."
             )
 
+        # BL-100: profiler slowms as explicit signal
+        max_slowms = max(profiler_slowms_values, default=0)
+
         signals = [
             Signal("slow_query_pct",     slow_pct,         "%",       self._thresholds["slow_query_pct_warning"]),
             Signal("slow_query_count",   count,            "queries"),   # info only — no threshold
@@ -633,6 +713,8 @@ class HealthCheckRunner:
             Signal("max_execution_ms",    max_ms,           "ms",      self._thresholds["slow_query_ms_warning"]),
             Signal("avg_execution_ms",    round(avg_ms, 1), "ms"),
         ]
+        if max_slowms > 0:
+            signals.append(Signal("profiler_slowms", max_slowms, "ms", 100))
         if profiler_off_dbs:
             signals.append(Signal("profiler_disabled_dbs", len(profiler_off_dbs), "databases", 0))
         if profiler_high_ms_dbs:
@@ -722,25 +804,47 @@ class HealthCheckRunner:
         used   = [i for i in all_indexes if i["ops"] > 0]
         custom = [i for i in all_indexes if not i["is_id"]]
 
-        # BL-007: detect redundant indexes (exact duplicates + left-prefix redundancies)
+        # BL-007: detect redundant indexes (left-prefix redundancies)
+        # BL-096: detect exact duplicate indexes (identical key spec including directions)
         # Group by db+collection, then compare key patterns within each group.
         redundant: List[Dict[str, Any]] = []
+        exact_dupes: List[Dict[str, Any]] = []
         from collections import defaultdict
         by_coll: Dict[str, List[Dict]] = defaultdict(list)
         for idx in all_indexes:
             if not idx["is_id"] and isinstance(idx.get("key"), dict):
                 by_coll[f"{idx['db']}.{idx['collection']}"].append(idx)
+
         for fq_coll, idxs in by_coll.items():
+            # BL-096: exact duplicates — same key fields AND directions
+            seen_key_specs: Dict[str, str] = {}  # canonical key str → first index name
+            for idx in idxs:
+                key_canon = str(list(idx["key"].items()))
+                if key_canon in seen_key_specs:
+                    if not any(d["name"] == idx["name"] and d["fq_coll"] == fq_coll
+                               for d in exact_dupes):
+                        exact_dupes.append({
+                            **idx,
+                            "duplicate_of": seen_key_specs[key_canon],
+                            "fq_coll": fq_coll,
+                        })
+                else:
+                    seen_key_specs[key_canon] = idx["name"]
+
+            # BL-007: left-prefix redundancies (key names only — direction-agnostic)
             key_lists = [list(idx["key"].keys()) for idx in idxs]
             for i, idx_a in enumerate(idxs):
+                # Skip if already flagged as an exact duplicate
+                if any(d["name"] == idx_a["name"] and d["fq_coll"] == fq_coll
+                       for d in exact_dupes):
+                    continue
                 keys_a = key_lists[i]
                 for j, idx_b in enumerate(idxs):
                     if i == j:
                         continue
                     keys_b = key_lists[j]
-                    # idx_a is a left-prefix of idx_b (or exact dup) → idx_a is redundant
-                    if len(keys_a) <= len(keys_b) and keys_b[:len(keys_a)] == keys_a:
-                        # Avoid double-reporting: only flag the shorter/equal one once
+                    # idx_a is a left-prefix of idx_b → idx_a is redundant
+                    if 0 < len(keys_a) < len(keys_b) and keys_b[:len(keys_a)] == keys_a:
                         if not any(r["name"] == idx_a["name"] and r["collection"] == idx_a["collection"]
                                    for r in redundant):
                             redundant.append({
@@ -750,9 +854,30 @@ class HealthCheckRunner:
                             })
                         break
 
-        severity = HealthSeverity.WARNING if (unused or redundant) else HealthSeverity.OK
+        if exact_dupes:
+            severity = HealthSeverity.CRITICAL
+        elif unused or redundant:
+            severity = HealthSeverity.WARNING
+        else:
+            severity = HealthSeverity.OK
 
         findings: List[str] = []
+
+        # BL-096: exact duplicate findings (highest priority — always safe to drop)
+        if exact_dupes:
+            findings.append(
+                f"{len(exact_dupes)} exact duplicate index(es) detected — identical key spec "
+                f"as an existing index, consuming RAM and slowing writes with zero benefit."
+            )
+            for idx in exact_dupes[:10]:
+                key_str = ", ".join(f"{k}: {v}" for k, v in idx["key"].items())
+                findings.append(
+                    f'  {idx["fq_coll"]} → "{idx["name"]}" {{{key_str}}} '
+                    f'is an exact duplicate of "{idx["duplicate_of"]}"'
+                )
+            if len(exact_dupes) > 10:
+                findings.append(f"  … and {len(exact_dupes) - 10} more exact duplicate(s).")
+
         if unused:
             findings.append(
                 f"{len(unused)} of {len(custom)} custom index(es) have never been used since "
@@ -768,7 +893,7 @@ class HealthCheckRunner:
             findings.append(
                 "Review with the app team before dropping — confirm no seasonal or batch queries."
             )
-        else:
+        elif not exact_dupes:
             findings.append(
                 f"All {len(custom)} custom index(es) across "
                 f"{len({i['collection'] for i in all_indexes})} collection(s) are actively used."
@@ -797,10 +922,11 @@ class HealthCheckRunner:
             )
 
         signals = [
-            Signal("total_indexes",     len(all_indexes), "indexes"),
-            Signal("unused_indexes",    len(unused),      "indexes", 0),
-            Signal("redundant_indexes", len(redundant),   "indexes", 0),
-            Signal("used_indexes",      len(used),        "indexes"),
+            Signal("total_indexes",       len(all_indexes),  "indexes"),
+            Signal("exact_duplicates",    len(exact_dupes),  "indexes", 0),
+            Signal("unused_indexes",      len(unused),       "indexes", 0),
+            Signal("redundant_indexes",   len(redundant),    "indexes", 0),
+            Signal("used_indexes",        len(used),         "indexes"),
         ]
 
         return ReportSection(
@@ -947,6 +1073,33 @@ class HealthCheckRunner:
                 f"  Lock wait percentage ({lock_wait_pct:.1f}%) exceeds warning threshold "
                 f"({self._thresholds['lock_wait_pct_warning']}%) — watch for concurrency issues."
             )
+
+        # ── BL-097: Active long-running operations ──────────────────────────────
+        long_ops = self._mongo.get_current_op(
+            running_longer_than_secs=self._thresholds["long_running_op_warning_sec"]
+        )
+        long_ops_count = len(long_ops)
+        longest_op_sec = max((int(op.get("secs_running", 0)) for op in long_ops), default=0)
+        signals.append(Signal("long_running_ops_count", long_ops_count, "operations", 0))
+        if long_ops_count > 0:
+            signals.append(Signal("longest_op_sec", longest_op_sec, "s",
+                                  self._thresholds["long_running_op_critical_sec"]))
+            if longest_op_sec >= self._thresholds["long_running_op_critical_sec"]:
+                severities.append(HealthSeverity.CRITICAL)
+            else:
+                severities.append(HealthSeverity.WARNING)
+            top_ops = sorted(long_ops, key=lambda x: -int(x.get("secs_running", 0)))[:3]
+            findings.append(
+                f"  {long_ops_count} operation(s) running ≥ "
+                f"{self._thresholds['long_running_op_warning_sec']}s "
+                f"(longest: {longest_op_sec}s):"
+            )
+            for op in top_ops:
+                ns      = op.get("ns", op.get("command", {}).get("$db", "unknown"))
+                secs    = int(op.get("secs_running", 0))
+                op_type = op.get("op", "?")
+                waiting = "  [waiting for lock]" if op.get("waitingForLock") else ""
+                findings.append(f"    {op_type} on {ns}  {secs}s{waiting}")
 
         # ── Cluster-level query targeting ratio ────────────────────────────────
         qe = ss.get("metrics", {}).get("queryExecutor", {})

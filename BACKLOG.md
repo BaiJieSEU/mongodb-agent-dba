@@ -69,15 +69,31 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-072 | Non-Docker quickstart script | P2 | M | 8 | 🔲 |
 | BL-040 | Approval-gated index creation | P2 | L | 5 | 🔲 |
 | BL-051 | REST API + Web UI | P2 | XL | 6 | 🔲 |
+| BL-094 | Replication lag threshold + member up/down signals | P1 | S | 1 | ✅ Done |
+| BL-095 | Index size per collection in Storage & Capacity | P1 | S | 1 | ✅ Done |
+| BL-096 | Exact duplicate index detection | P1 | S | 1 | ✅ Done |
+| BL-097 | Active long-running operations signal | P1 | S | 1 | ✅ Done |
+| BL-100 | Profiler slowms as explicit report signal | P1 | S | 1 | ✅ Done |
+| BL-102 | Aggregation pipeline anti-patterns in Query Performance | P1 | M | 1 | 🔲 |
+| BL-106 | Backup configuration detection | P1 | M | 9 | 🔲 |
+| BL-107 | Restore readiness check | P1 | M | 9 | 🔲 |
+| BL-098 | Page fault rate / trend signal | P2 | S | 1 | 🔲 |
+| BL-099 | Network throughput signals (bytesIn/Out) | P2 | S | 1 | 🔲 |
+| BL-101 | Index cardinality / quality check | P2 | M | 1 | 🔲 |
+| BL-103 | Query plan cache hit rate | P2 | M | 1 | 🔲 |
+| BL-104 | Batch vs 24×7 workload detection | P2 | M | 1 | 🔲 |
+| BL-105 | Collection-level read/write ratio | P2 | M | 1 | 🔲 |
+| BL-109 | Monitoring alert coverage quality | P2 | M | 9 | 🔲 |
+| BL-108 | Hot shards + chunk distribution (conditional) | P2 | L | 9 | 🔲 |
 | BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
 | BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
 
-**Done:** 29 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014, BL-009, BL-034, BL-070, BL-030, BL-050, BL-076, BL-078, BL-079, BL-080, BL-021, BL-006, BL-007, BL-081, BL-082, BL-084, BL-085, BL-087, BL-092)
+**Done:** 34 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014, BL-009, BL-034, BL-070, BL-030, BL-050, BL-076, BL-078, BL-079, BL-080, BL-021, BL-006, BL-007, BL-081, BL-082, BL-084, BL-085, BL-087, BL-092, BL-094, BL-095, BL-096, BL-097, BL-100)
 **Partial:** 1 item (BL-071 — LLM+MongoDB env vars done, full coverage pending)
 **P0:** 1 remaining — scheduler (BL-011)
-**P1:** 30 items — high-value once P0 is in place (includes BL-088, BL-089, BL-090, BL-091, BL-093)
-**P2–P3:** 9 items — important but not blocking
-**Total:** 53 items across 8 epics (28 done, 1 partial, 24 remaining)
+**P1:** 32 items — high-value once P0 is in place (includes BL-088–BL-093, BL-102, BL-106–BL-107)
+**P2–P3:** 16 items — important but not blocking (includes BL-098–BL-099, BL-101, BL-103–BL-105, BL-108–BL-109)
+**Total:** 69 items across 9 epics (29 done, 1 partial, 39 remaining)
 
 ---
 
@@ -1564,3 +1580,471 @@ document counts via `count`. Computes avg bytes/doc and flags collections over t
 Index Usage section: `aggregate $indexStats` pipeline per collection. Parses BSON int64 `accesses.ops`
 (`{low, high, unsigned}` representation). Identifies unused indexes (ops=0), excludes `_id_` from
 drop candidates.
+
+## Epic 9 — PS Health Check Coverage Gaps
+
+*Goal: close the gaps identified in the PS health check review (2026-03-27).
+Items 13 map to existing report sections; 4 require new sections (§9 Backup & Recovery,
+§10 Sharding, §11 Alerting Coverage). No new sections should be created until at least
+BL-106/107 are implemented so Backup & Recovery has meaningful content.*
+
+---
+
+### BL-094 · Replication lag threshold + member up/down signals
+**Priority:** P1 | **Size:** S | **Epic:** 9 | **Section:** §3 Replication Health
+
+**Story:** As a DBA, I want §3 Replication Health to report explicit per-member
+replication lag and node up/down status so I can detect a lagging or missing secondary
+before it puts the cluster at risk.
+
+**Context:** The current implementation reads `local.system.replset` for RS config and
+`local.oplog.rs` for oplog window. `replSetGetStatus` is not available via MCP. However,
+`local.system.replset` contains `lastHeartbeatRecv` and `optimeDate` per member from the
+**primary's** perspective — available without `replSetGetStatus`.
+
+**Metrics to add (all from `local.system.replset` — existing MCP source):**
+
+| Signal | Source field | Threshold |
+|--------|-------------|-----------|
+| `replication_lag_max_sec` | `max(now - member.optimeDate)` across non-primary members | WARN >10s, CRIT >60s |
+| `members_up` | count of members where `health == 1` | CRIT if < majority |
+| `members_down` | count of members where `health == 0` | WARN ≥1, CRIT ≥ majority |
+
+**Acceptance criteria:**
+- `_section_replication_health()` extracts `optimeDate` and `health` per member from
+  `local.system.replset` result already fetched by the section
+- New signals: `replication_lag_max_sec`, `members_up`, `members_down`
+- Finding text names the lagging/down member (e.g. `"secondary rs-node-2:27017 is 45 s behind"`)
+- Severity WARNING if any member has lag > 10 s or health == 0; CRITICAL if lag > 60 s or
+  a majority of members are unhealthy
+- Standalone gracefully remains "not applicable"
+
+---
+
+### BL-095 · Index size per collection in Storage & Capacity
+**Priority:** P1 | **Size:** S | **Epic:** 9 | **Section:** §4 Storage & Capacity
+
+**Story:** As a DBA, I want §4 Storage & Capacity to show index size alongside data size
+for each collection so I can detect index bloat and plan capacity correctly.
+
+**Data source:** `db-stats` already returns `indexSize` at the database level (already
+fetched). `collection-stats` (via `collection-storage-size` MCP tool) returns per-collection
+data size. The MCP `db-stats` tool response includes `indexSize` — already available.
+
+**Metrics to add:**
+
+| Signal | Source | Threshold |
+|--------|--------|-----------|
+| `total_index_size_mb` | `db-stats.indexSize / 1024²` summed across DBs | INFO only |
+| `index_to_data_ratio` | total index size / total data size | WARN if > 2× |
+
+**Acceptance criteria:**
+- `_section_storage_capacity()` extracts `indexSize` from existing `db_stats()` result
+- New signals: `total_index_size_mb`, `index_to_data_ratio`
+- Finding text: `"Index size (X MB) is Y× data size — consider reviewing unused indexes"`
+  when ratio > 2
+- Severity WARNING if `index_to_data_ratio > 2`; OK otherwise
+
+---
+
+### BL-096 · Exact duplicate index detection
+**Priority:** P1 | **Size:** S | **Epic:** 9 | **Section:** §7 Unused Indexes
+
+**Story:** As a DBA, I want the health check to detect indexes with identical key
+patterns on the same collection so I can safely drop exact duplicates that waste RAM
+and slow writes.
+
+**Context:** BL-007 delivered left-prefix redundancy detection (e.g. `{a:1}` redundant
+when `{a:1, b:1}` exists). This BL adds exact duplicate detection (two indexes with
+identical key specs, regardless of options like sparse/partial).
+
+**Data source:** `collection-indexes` MCP tool — already called per collection in §6.
+
+**Logic:** For each collection, group indexes by their canonical key spec (sorted key
+names + direction). Any group with ≥2 members contains duplicates — flag all but the
+one with the lower index size.
+
+**Acceptance criteria:**
+- Exact duplicate pairs reported as a CRITICAL finding (exact duplicates are always safe
+  to drop — no query plan benefits from a true duplicate)
+- Recommendation: `dropIndex(<duplicate_name>)` with evidence `"identical key pattern as <kept_index>"`
+- Distinguishes exact duplicates from left-prefix redundancies (BL-007)
+- Result adds to existing §7 Unused Indexes section — no new section needed
+
+---
+
+### BL-097 · Active long-running operations signal
+**Priority:** P1 | **Size:** S | **Epic:** 9 | **Section:** §8 Operations
+
+**Story:** As a DBA, I want §8 Operations to surface currently running operations that
+have been active for longer than a threshold so I can identify blocking queries before
+they cascade.
+
+**Context:** BL-005 proposes a full `currentOp` tool via MCP (MCP blocker still open).
+This BL uses `serverStatus.currentOp` (available via existing direct PyMongo path) as a
+lighter alternative that counts active operations by duration bucket.
+
+**Data source:** `serverStatus` — already fetched in `_section_operations()`.
+
+**serverStatus path:** `serverStatus.currentOp` is not present. Use
+`serverStatus.globalLock.currentQueue` for queued operations count and
+`serverStatus.metrics.operation.writeConflicts` for conflicts. Alternatively, expose
+`db.adminCommand({currentOp: 1, active: true, secs_running: {$gte: 5}})` via the
+existing direct PyMongo path in `MongoDBManager`.
+
+**Implementation choice:** Extend `MongoDBManager.get_server_status()` (or add a
+companion `get_current_op()`) that calls `currentOp` with `{active: true, secs_running: {$gte: 5}}`.
+
+**Acceptance criteria:**
+- New signal `long_running_ops_count` = count of active operations running ≥ 5 s
+- Optional signal `longest_op_sec` = duration of the single slowest active operation
+- Severity WARNING if `long_running_ops_count > 0`; CRITICAL if `longest_op_sec > 60`
+- Finding text lists the top 3 long-running ops by duration and namespace
+- Gracefully skips if `currentOp` is not accessible (insufficient privileges)
+- Note: resolves the signal gap identified by BL-005; BL-005 remains for full MCP tool integration
+
+---
+
+### BL-098 · Page fault rate / trend signal
+**Priority:** P2 | **Size:** S | **Epic:** 9 | **Section:** §8 Operations
+
+**Story:** As a DBA, I want the Operations section to track the page fault rate trend
+between runs rather than reporting the raw cumulative count (which is always increasing)
+so I can tell whether memory pressure is growing or stable.
+
+**Context:** `serverStatus.extra_info.page_faults` is a cumulative counter since mongod
+start — already collected. A single value is not actionable. A delta between consecutive
+runs is.
+
+**Implementation:** Use `BaselineManager` rolling window to compute delta:
+`current_page_faults - previous_page_faults_mean`. If the instance was restarted between
+runs the delta is invalid — detect by checking `serverStatus.uptimeMillis < run_interval`.
+
+**Acceptance criteria:**
+- Signal `page_fault_delta` = difference from rolling baseline (not absolute count)
+- During cold-start: report raw count with note "(baseline not yet established)"
+- Severity WARNING if delta > 2× baseline delta; CRITICAL if delta > 5× baseline delta
+- Hard limit: if raw page_faults > 1000/s (computed from uptime), always CRITICAL
+- Finding text: `"Page faults increased by X vs. baseline of Y/run — possible memory pressure"`
+
+---
+
+### BL-099 · Network throughput signals (bytesIn/Out)
+**Priority:** P2 | **Size:** S | **Epic:** 9 | **Section:** §8 Operations
+
+**Story:** As a DBA, I want §8 Operations to show network throughput (bytes in and out)
+so I can detect replication bandwidth saturation or unexpected traffic spikes.
+
+**Data source:** `serverStatus.network.bytesIn`, `serverStatus.network.bytesOut` —
+cumulative counters; already available via the existing `get_server_status()` path.
+
+**Acceptance criteria:**
+- New signals: `network_bytes_in_mb`, `network_bytes_out_mb` (cumulative since restart)
+- Signal `network_bytes_out_to_in_ratio` — unusually high ratio (> 10×) may indicate
+  large result sets returned to clients
+- Severity: INFO only (no static threshold — baseline comparison via BL-021 handles trends)
+- Displayed in the Operations signals table; no WARNING/CRITICAL from static thresholds
+
+---
+
+### BL-100 · Profiler slowms as explicit report signal
+**Priority:** P1 | **Size:** S | **Epic:** 9 | **Section:** §5 Query Performance
+
+**Story:** As a DBA reviewing a health report, I want to see the profiler's `slowms`
+threshold alongside slow query findings so I can judge whether the query sample is
+representative (a 200 ms threshold misses many problems a 5 ms threshold would catch).
+
+**Data source:** `system.profile` documents include `op: "command"` entries for
+`profile` admin commands, but the cleaner source is `db.getProfilingStatus()` — already
+queried by BL-006.
+
+**Implementation:** The profiler status is already available after §5 runs. Expose
+`slowms` as an explicit `Signal` in the §5 report section.
+
+**Acceptance criteria:**
+- New signal `profiler_slowms` added to §5 Query Performance signals list
+- Severity WARNING if `slowms > 100` (too coarse — important queries may be missed)
+- Severity OK if `slowms ≤ 50`
+- Finding text if WARNING: `"Profiler threshold is Xms — slow queries faster than Xms are not captured"`
+- Profiler-off state (level 0) already handled by BL-006; this BL assumes profiler is on
+
+---
+
+### BL-101 · Index cardinality / quality check
+**Priority:** P2 | **Size:** M | **Epic:** 9 | **Section:** §6 Missing Indexes
+
+**Story:** As a DBA, I want §6 Missing Indexes to flag recommended indexes where the
+candidate field has very low cardinality (e.g. a boolean `isActive` field) so I don't
+create indexes that MongoDB's query planner will ignore anyway.
+
+**Context:** When `_build_recommendations()` suggests `createIndex({field: 1})`, the field
+may be a boolean or a small enumerable. MongoDB typically won't use such an index when
+selectivity < ~3%. The check needs an estimate of distinct values.
+
+**Data source:** MCP `aggregate` with `$group` on the candidate field + `$count`:
+```
+[{"$group": {"_id": "$<field>"}}, {"$count": "distinct"}]
+```
+Limited to a sample of the collection to avoid performance impact.
+
+**Acceptance criteria:**
+- For each index recommendation with a single field, run a cardinality estimate
+  (capped at 10,000 docs via `$sample`)
+- If distinct count / sample size < 0.03 (3%), downgrade confidence to `low` and add
+  finding: `"Field '<field>' has low cardinality (N distinct values in sample) — index
+  unlikely to be selected by query planner"`
+- Does not suppress the recommendation — still emitted, but with `confidence: low`
+- Cardinality check skipped for compound indexes (too expensive to enumerate combinations)
+- Adds `cardinality_check_skipped: true` signal when collection is > 1M docs and sample
+  would be too slow
+
+---
+
+### BL-102 · Aggregation pipeline anti-patterns in Query Performance
+**Priority:** P1 | **Size:** M | **Epic:** 9 | **Section:** §5 Query Performance
+
+**Story:** As a DBA, I want §5 Query Performance to detect slow aggregation pipelines
+in the profiler and flag common anti-patterns (`$match` after `$group`, `$lookup` without
+index, `$unwind` before `$match`) so I can fix the most expensive pipelines.
+
+**Context:** BL-008 proposed full `explain` on aggregation pipelines. This BL delivers a
+lighter version: pattern-match on the `command.pipeline` field in `system.profile` to
+detect anti-patterns without running `explain` on every pipeline.
+
+**Data source:** `system.profile` — already queried. Profiler records `command.pipeline`
+for aggregation operations.
+
+**Anti-patterns to detect:**
+
+| Pattern | Detection | Impact |
+|---------|-----------|--------|
+| `$match` after `$group` | `$group` appears before `$match` in pipeline array | Full scan before filter |
+| `$lookup` with no index on `from.localField` | Check indexes on joined collection | Full join scan |
+| `$sort` without index (large collection) | `hasSortStage: true` + no index covers sort key | Memory sort / disk spill |
+| `$unwind` before `$match` | `$unwind` precedes `$match` | Cartesian explosion before filter |
+
+**Acceptance criteria:**
+- `_section_query_performance()` parses `command.pipeline` from profiler entries where `op == "command"`
+- Each anti-pattern detected adds a finding with the collection, the anti-pattern name, and fix advice
+- Recommendation: restructured pipeline snippet showing corrected stage order
+- `slow_aggregation_count` signal added to §5
+- Extends BL-008 scope; BL-008 remains for full `explain` integration
+
+---
+
+### BL-103 · Query plan cache hit rate
+**Priority:** P2 | **Size:** M | **Epic:** 9 | **Section:** §5 Query Performance
+
+**Story:** As a DBA, I want §5 Query Performance to report the query plan cache hit rate
+so I can detect workloads that are constantly re-planning (cache thrashing) which adds
+CPU overhead on every request.
+
+**Data source:** `serverStatus.metrics.queryPlanner.planCacheTotalQueryShapes` and
+`serverStatus.metrics.queryPlanner.planCacheHits` / `planCacheMisses` — available via
+existing `get_server_status()` path.
+
+**Note:** These counters were added in MongoDB 7.0. Add a version check; gracefully skip
+on MongoDB < 7.0 with a note.
+
+**Acceptance criteria:**
+- New signals: `plan_cache_hits`, `plan_cache_misses`, `plan_cache_hit_rate_pct`
+- `plan_cache_hit_rate_pct = hits / (hits + misses) * 100`
+- Severity WARNING if hit rate < 80%; CRITICAL if < 50%
+- Finding text: `"Plan cache hit rate is X% — query planner is re-planning frequently"`
+- Gracefully skips on MongoDB < 7.0 with finding: `"Plan cache metrics not available (requires MongoDB 7.0+)"`
+
+---
+
+### BL-104 · Batch job vs 24×7 workload detection
+**Priority:** P2 | **Size:** M | **Epic:** 9 | **Section:** §5 Query Performance
+
+**Story:** As a DBA, I want the health check to detect whether slow query spikes are
+caused by periodic batch jobs (acceptable) vs. continuous 24×7 load (needs fixing) so
+recommendations are correctly prioritised.
+
+**Context:** A batch job that runs once a night may produce 500 slow queries at 02:00
+but the cluster is healthy at all other times. Flagging this as CRITICAL (same as a
+continuous high load) leads to noise.
+
+**Data source:** `system.profile` timestamp distribution — already fetched. Analyse
+`ts` field distribution across the slow query sample.
+
+**Detection heuristic:**
+- Compute `slow_query_count` per hour bucket for the last 24 h
+- If max(bucket) / mean(non-zero-buckets) > 5×, classify as "bursty / batch"
+- If all buckets are within 2× of mean, classify as "continuous"
+
+**Acceptance criteria:**
+- New signal `workload_pattern`: `"bursty"` | `"continuous"` | `"unknown"` (< 2 h data)
+- If `bursty`: downgrade severity one level (CRITICAL → WARNING, WARNING → OK) and add
+  finding: `"Slow query spike appears batch-related (Xh burst pattern) — verify this is expected"`
+- If `continuous`: keep severity unchanged
+- Pattern stored in baseline for trend comparison across runs
+
+---
+
+### BL-105 · Collection-level read/write ratio
+**Priority:** P2 | **Size:** M | **Epic:** 9 | **Section:** §8 Operations
+
+**Story:** As a DBA, I want §8 Operations to show the read/write ratio per busy
+collection so I can identify write-heavy collections that need write-optimised indexes
+vs. read-heavy collections that need query indexes.
+
+**Data source:** `system.profile` — already fetched. Profile entries include `op` field
+(`find`, `insert`, `update`, `delete`, `command`). Group by `(db, collection, op)` from
+the existing slow query sample.
+
+**Note:** This reflects the *slow* query read/write ratio, not the full workload ratio.
+Make this clear in the finding text.
+
+**Acceptance criteria:**
+- For the top 5 collections by slow query count, compute `read_count`, `write_count`,
+  `rw_ratio` from profiler data
+- New signal `top_collection_rw_ratio` emitted as a structured finding (not a scalar signal)
+- Finding text: `"orders: 80% reads / 20% writes (from slow query sample)"`
+- Severity: INFO only — no threshold breach from this signal alone
+- Useful context for index recommendations in §6
+
+---
+
+### BL-106 · Backup configuration detection
+**Priority:** P1 | **Size:** M | **Epic:** 9 | **Section:** §9 Backup & Recovery (NEW)
+
+**Story:** As a DBA, I want the health check to detect whether a backup solution is
+configured and when the last backup completed so I can assess data recovery readiness
+without manually checking backup tooling.
+
+**New section:** §9 Backup & Recovery — consequence tier P1 (Outage: no backup means
+unrecoverable failure on disk loss). This section is created when BL-106 is implemented.
+
+**Detection approach (no backup agent access needed):**
+MongoDB backup solutions leave traces readable via the MCP/serverStatus path:
+
+| Backup tool | Detection method |
+|------------|-----------------|
+| MongoDB Ops Manager / Cloud Manager | `serverStatus.backupCursorOpen` — non-null if hot backup cursor is open |
+| mongodump (file-based) | Cannot detect — note as "unknown, verify manually" |
+| Atlas backup | Not applicable (Atlas-managed) |
+| `$backupCursor` (4.2+) | Query `admin.$cmd.aggregate` with `{$backupCursorExtend}` — presence of the cursor indicates active backup |
+
+**Signals to emit:**
+
+| Signal | Source | Note |
+|--------|--------|------|
+| `backup_cursor_open` | `serverStatus.storageEngine.backupCursorOpen` (if present) | Boolean |
+| `backup_method_detected` | String: `"ops_manager"` \| `"mongodump"` \| `"unknown"` | From heuristics |
+
+**Acceptance criteria:**
+- New `_section_backup_recovery()` method in `HealthCheckRunner`
+- If no backup signal detected: severity WARNING + finding `"No backup solution detected — verify backup configuration manually"`
+- If backup cursor open: severity OK + finding `"Hot backup cursor is open — backup appears active"`
+- Section renders in HTML/Markdown/JSON report as §9 Backup & Recovery
+- `SECTION_TIER["Backup & Recovery"] = "P1"` added to `html_reporter.py`
+
+---
+
+### BL-107 · Restore readiness check
+**Priority:** P1 | **Size:** M | **Epic:** 9 | **Section:** §9 Backup & Recovery
+
+**Story:** As a DBA, I want the health check to assess restore readiness by checking
+whether the oplog window is sufficient to perform a point-in-time restore so I can
+detect when the oplog is too short to bridge the backup-to-restore gap.
+
+**Context:** For replica set point-in-time restore (PITR), the oplog window must be
+longer than the backup interval. If backups run daily, the oplog must cover > 24 h.
+The oplog window is already computed in §3 Replication Health.
+
+**Acceptance criteria:**
+- `_section_backup_recovery()` (created by BL-106) reads the oplog window from the §3
+  result (pass as parameter or read from shared state)
+- Signal `pitr_window_hours` = oplog window hours (same value as §3)
+- Signal `pitr_viable` = boolean: True if oplog window > configurable backup interval
+  (default: 24 h, configurable via `thresholds.backup_interval_hours`)
+- Severity WARNING if `pitr_window_hours < backup_interval_hours`
+- CRITICAL if `pitr_window_hours < 2` (already caught by §3 hard limit — note cross-reference)
+- Finding text: `"Oplog window (Xh) is shorter than backup interval (Yh) — PITR may not be possible"`
+- New config: `thresholds.backup_interval_hours: 24`
+
+---
+
+### BL-108 · Hot shards + chunk distribution (conditional)
+**Priority:** P2 | **Size:** L | **Epic:** 9 | **Section:** §10 Sharding (NEW, conditional)
+
+**Story:** As a DBA managing a sharded cluster, I want the health check to detect hot
+shards and uneven chunk distribution so I can identify balancer issues or poor shard key
+choices before they cause performance degradation.
+
+**Conditional section:** §10 Sharding only renders if the cluster is sharded. Detection:
+`serverStatus.process == "mongos"` or `serverStatus.sharding` key is present.
+
+**New section:** §10 Sharding — consequence tier P2 (Degraded: hot shard causes slow
+queries on that shard; cluster stays available).
+
+**Data source:** Config server `config.chunks` collection — readable via MCP `find` on
+the `config` database. Available from a `mongos` connection.
+
+**Metrics:**
+
+| Signal | Source | Threshold |
+|--------|--------|-----------|
+| `shard_count` | `config.shards` count | INFO |
+| `chunk_count` | `config.chunks` count | INFO |
+| `chunk_imbalance_ratio` | max_chunks_on_shard / min_chunks_on_shard | WARN > 1.5, CRIT > 3 |
+| `jumbo_chunk_count` | chunks with `jumbo: true` | WARN ≥ 1 |
+
+**Acceptance criteria:**
+- `_section_sharding()` skips silently (no section emitted) if cluster is not sharded
+- Chunk distribution computed by grouping `config.chunks` by `shard` field
+- `chunk_imbalance_ratio` WARNING if > 1.5×, CRITICAL if > 3×
+- Jumbo chunks flagged with finding: `"X jumbo chunk(s) detected — balancer cannot split these"`
+- `SECTION_TIER["Sharding"] = "P2"` added to `html_reporter.py`
+- Works when agent is connected to `mongos`; skips if connected to a replica set primary
+
+---
+
+### BL-109 · Monitoring alert coverage quality
+**Priority:** P2 | **Size:** M | **Epic:** 9 | **Section:** §11 Alerting Coverage (NEW)
+
+**Story:** As a DBA, I want the health check to evaluate whether the key health
+indicators it collects are also covered by the cluster's alerting configuration so I can
+identify monitoring blind spots.
+
+**New section:** §11 Alerting Coverage — consequence tier P2 (Degraded: gaps in
+alerting mean issues won't be caught until they cause impact).
+
+**Implementation approach:** The agent cannot directly query the customer's alerting
+system (PagerDuty, OpsGenie, Datadog, MongoDB Ops Manager alerts). Instead, this section
+compares the current health check findings against a configurable checklist of
+"should-be-alerted" conditions.
+
+**Config-driven checklist** (`config/alert_checklist.yaml`):
+```yaml
+expected_alerts:
+  - metric: disk_used_pct
+    threshold: 80
+    description: "Disk usage > 80%"
+  - metric: oplog_window_hours
+    threshold: 24
+    description: "Oplog window < 24h"
+  - metric: replication_lag_max_sec
+    threshold: 30
+    description: "Replication lag > 30s"
+  - metric: cache_hit_ratio_pct
+    threshold: 90
+    description: "Cache hit ratio < 90%"
+```
+
+For each expected alert: if the health check finds a breach on that metric AND severity ≥ WARNING,
+the alert is likely covered. If the check finds a breach but the operator says "we have alerts",
+note as covered. If no breach in this run, mark as "untested (metric OK this run)".
+
+**Acceptance criteria:**
+- New `config/alert_checklist.yaml` with default checklist of 5–8 critical metrics
+- `_section_alerting_coverage()` compares current run breaches against checklist
+- Output: `covered`, `gap`, or `untested` per checklist item
+- Finding text for gaps: `"No alert configured for disk_used_pct > 80% — add an alert in your monitoring tool"`
+- Severity WARNING if ≥ 1 critical metric has no alert coverage
+- `SECTION_TIER["Alerting Coverage"] = "P2"` added to `html_reporter.py`
+- Section gracefully skips if `config/alert_checklist.yaml` is absent
+
+---

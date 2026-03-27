@@ -1,7 +1,7 @@
 """MongoDB client utilities"""
 
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pymongo import MongoClient
 from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure
 from contextlib import contextmanager
@@ -83,6 +83,38 @@ class MongoDBManager:
         except Exception as e:
             logger.warning(f"serverStatus unavailable: {e}")
             return None
+
+    def get_rs_status(self) -> Optional[Dict[str, Any]]:
+        """Return admin.command("replSetGetStatus") from the monitored cluster.
+
+        Read-only admin command — clusterMonitor role required.
+        Returns None on standalone instances or insufficient privileges.
+        Used by HealthCheckRunner §3 (BL-094).
+        """
+        try:
+            result = self.monitored_cluster.admin.command("replSetGetStatus")
+            return result
+        except Exception as e:
+            logger.debug("replSetGetStatus unavailable: %s", e)
+            return None
+
+    def get_current_op(self, running_longer_than_secs: int = 5) -> List[Dict[str, Any]]:
+        """Return active operations running ≥ threshold seconds.
+
+        Uses currentOp admin command — read-only, clusterMonitor role required.
+        Returns [] on standalone instances, insufficient privileges, or any error.
+        Used by HealthCheckRunner §8 (BL-097).
+        """
+        try:
+            result = self.monitored_cluster.admin.command({
+                "currentOp": 1,
+                "active": True,
+                "secs_running": {"$gte": running_longer_than_secs},
+            })
+            return result.get("inprog", [])
+        except Exception as e:
+            logger.debug("currentOp unavailable: %s", e)
+            return []
 
     def test_connections(self) -> Dict[str, bool]:
         """Test both MongoDB connections"""
