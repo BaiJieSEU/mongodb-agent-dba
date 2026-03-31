@@ -50,6 +50,7 @@ _HIGHER_IS_WORSE = {
     "disk_used_pct",
     "lock_wait_pct",
     "cluster_targeting_ratio",
+    "page_faults",           # BL-098
 }
 
 # Metrics where a *lower* current value compared with the baseline is worse
@@ -110,6 +111,9 @@ class BaselineManager:
             if doc:
                 self._run_count = int(doc.get("run_count", 0))
                 self._metrics   = {k: list(v) for k, v in doc.get("metrics", {}).items()}
+                # BL-122: load score history into metrics dict for unified access
+                if "score_history" in doc:
+                    self._metrics["score_history"] = list(doc["score_history"])
                 logger.info(
                     "Baseline loaded for %s — %d prior run(s)",
                     self._cluster_uri, self._run_count,
@@ -147,6 +151,25 @@ class BaselineManager:
         if not values:
             return None
         return sum(values) / len(values)
+
+    def trend(self, metric: str, current: float, higher_is_worse: bool = True) -> Optional[str]:
+        """Return "up" | "down" | "stable" | None.
+
+        None means no baseline history yet (cold start or new metric).
+        Direction is always raw: "up" means current > mean, "down" means current < mean.
+        The caller / renderer decides whether "up" is good or bad for this metric.
+        """
+        if self.is_cold_start:
+            return None
+        mean = self.baseline_mean(metric)
+        if mean is None or mean == 0:
+            return None
+        ratio = current / mean
+        if ratio > 1.10:
+            return "up"
+        if ratio < 0.90:
+            return "down"
+        return "stable"
 
     # ── severity assessment ─────────────────────────────────────────────────────
 
@@ -265,8 +288,11 @@ class BaselineManager:
 
     # ── persistence ─────────────────────────────────────────────────────────────
 
-    def record_from_report(self, report: "HealthCheckReport") -> None:
-        """Extract key signals from report sections and persist to rolling baseline."""
+    def record_from_report(self, report: "HealthCheckReport", score: Optional[int] = None) -> None:
+        """Extract key signals from report sections and persist to rolling baseline.
+
+        score: the computed health score (0–100) for this run — stored for sparkline (BL-122).
+        """
         # Maps (section_name, signal_name) → baseline_metric_key
         _SIGNAL_MAP: Dict[Tuple[str, str], str] = {
             ("Query Performance", "slow_query_pct"):        "slow_query_pct",
@@ -276,6 +302,7 @@ class BaselineManager:
             ("Operations",        "wt_cache_hit_ratio"):    "cache_hit_ratio_pct",
             ("Operations",        "lock_wait_pct"):         "lock_wait_pct",
             ("Operations",        "cluster_targeting_ratio"): "cluster_targeting_ratio",
+            ("Operations",        "page_faults"):           "page_faults",   # BL-098
         }
 
         metrics: Dict[str, float] = {}
@@ -296,6 +323,8 @@ class BaselineManager:
                 f"metrics.{k}": {"$each": [v], "$slice": -self.BASELINE_WINDOW}
                 for k, v in metrics.items()
             }
+            if score is not None:
+                push_ops["score_history"] = {"$each": [score], "$slice": -self.BASELINE_WINDOW}
             coll.update_one(
                 {"cluster_uri": self._cluster_uri},
                 {"$inc": {"run_count": 1}, "$push": push_ops},
@@ -310,3 +339,7 @@ class BaselineManager:
         finally:
             if client:
                 client.close()
+
+    def score_history(self) -> List[int]:
+        """Return stored score history for sparkline rendering (BL-122)."""
+        return [int(v) for v in self._metrics.get("score_history", [])]

@@ -10,9 +10,9 @@ from __future__ import annotations
 from models.multi_cluster_report import MultiClusterReport
 from models.health_check_report import HealthSeverity
 from utils.html_reporter import (
-    _CSS, _health_score, _sidebar, _status_bar,
-    _build_content, _recommendations_html, _overall_health_summary, _rating_explainer,
-    SECTION_TIER, _TIER_LABEL,
+    _CSS, _health_score, _sidebar,
+    _build_content, _recommendations_html,
+    SECTION_TIER, _TIER_LABEL, _SECTION_META,
 )
 
 _TAB_CSS = """
@@ -36,20 +36,12 @@ _TAB_CSS = """
 .tab-btn:hover  { color: var(--t1); }
 .tab-btn.active { color: var(--t1); border-bottom-color: var(--blue); }
 .tab-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.tdot-ok   { background: var(--green); }
-.tdot-warn { background: var(--amber); }
-.tdot-crit { background: var(--red); }
+.tdot-ok   { background: var(--border-em); }
+.tdot-warn { background: var(--t3); }
+.tdot-crit { background: var(--t2); }
 
-/* ── Cluster identity label (right side of tab bar — BL-079) ── */
+/* ── Tab bar spacer + theme toggle ── */
 .tab-spacer { flex: 1; min-width: 16px; }
-.tab-identity {
-  display: flex; align-items: center; gap: 7px;
-  padding: 0 8px; font-size: 12px; color: var(--t2);
-  white-space: nowrap; flex-shrink: 0; border-left: 1px solid var(--border);
-  margin-left: 4px; padding-left: 16px;
-}
-.tab-id-label { color: var(--t3); font-size: 11px; }
-.tab-id-name  { font-weight: 600; color: var(--t1); font-size: 13px; }
 
 /* ── Dropdown nav for large fleets (> 6 clusters — BL-078) ── */
 .cluster-select-wrap {
@@ -83,9 +75,9 @@ _TAB_CSS = """
   padding: 6px 20px; border-radius: 8px; margin: 16px 0 4px;
   font-family: var(--mono);
 }
-.fleet-score-ok   { background: rgba(79,201,100,.15); color: var(--green); }
-.fleet-score-warn { background: rgba(243,156,18,.15);  color: var(--amber); }
-.fleet-score-crit { background: rgba(231,76,60,.15);   color: var(--red);   }
+.fleet-score-ok   { background: var(--surface2); color: var(--t1); }
+.fleet-score-warn { background: var(--surface2); color: var(--t1); }
+.fleet-score-crit { background: var(--surface2); color: var(--t1); font-weight: 800; }
 .summary-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .summary-table th { text-align: left; padding: 8px 12px; color: var(--t3); font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; border-bottom: 1px solid var(--border); }
 .summary-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
@@ -100,15 +92,36 @@ _TAB_CSS = """
 .view-link:hover { text-decoration: underline; }
 .score-cell { font-family: var(--mono); font-weight: 700; font-size: 14px; white-space: nowrap; }
 .score-unit { font-size: 11px; color: var(--t3); font-weight: 400; }
-.score-ok   { color: var(--green); }
-.score-warn { color: var(--amber); }
-.score-crit { color: var(--red);   }
+.score-ok   { color: var(--t1); }
+.score-warn { color: var(--t1); }
+.score-crit { color: var(--t1); font-weight: 800; }
 .n-actions-cell { color: var(--t2); font-size: 12px; }
+
+/* ── Mini score ring (BL-128) ── */
+.mini-ring { position: relative; width: 36px; height: 36px; display: inline-block; vertical-align: middle; }
+.mini-ring svg { transform: rotate(-90deg); }
+.mini-ring-num {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 800; font-family: var(--mono);
+}
+/* ── Section heatmap (BL-128) ── */
+.heatmap-wrap { margin-top: 24px; margin-bottom: 8px; }
+.heatmap-title { font-size: 11px; font-weight: 600; color: var(--t3); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
+.heatmap-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.heatmap-table th { text-align: left; padding: 4px 6px; color: var(--t3); font-size: 10px; font-weight: 600; letter-spacing: .03em; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.heatmap-table td { padding: 4px 6px; text-align: center; border-bottom: 1px solid var(--border); }
+.heatmap-table td:first-child { text-align: left; font-weight: 600; color: var(--t1); white-space: nowrap; }
+.hm-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.hm-ok   { background: var(--border-em); }
+.hm-warn { background: var(--t3); }
+.hm-crit { background: var(--t2); }
+.hm-na   { background: var(--border); }
 
 @media (max-width: 820px) {
   .cluster-panel .sidebar { top: 0; height: auto; }
   .cluster-panel .section { scroll-margin-top: 24px; }
-  .tab-identity { display: none; }
+  .cluster-tabs .pill-toggle { display: none; }
   .summary-panel { padding: 16px; }
 }
 """
@@ -145,17 +158,6 @@ function switchCluster(idx) {
   var btns = document.querySelectorAll('.tab-btn');
   if (btns[idx]) btns[idx].classList.add('active');
 
-  // Update identity label (right side of sticky tab bar)
-  var meta = _clusterMeta[idx];
-  if (meta) {
-    var dot  = document.getElementById('tab-id-dot');
-    var name = document.getElementById('tab-id-name');
-    var sev  = document.getElementById('tab-id-sev');
-    if (dot)  { dot.className = 'tab-dot ' + (meta.dotCls || ''); }
-    if (name) { name.textContent = meta.name; }
-    if (sev)  { sev.textContent = meta.sevLabel; sev.style.color = meta.sevColor || ''; }
-  }
-
   // Sync dropdown if present (dropdown values are also 0-based where 0 = summary)
   var sel = document.querySelector('.cluster-select');
   if (sel) sel.value = idx;
@@ -172,6 +174,21 @@ document.addEventListener('click', function(e) {
   var target = document.querySelector(a.getAttribute('href'));
   if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
 });
+
+// BL-118: light/dark theme toggle (shared with single-cluster report)
+function toggleTheme() {
+  var root = document.documentElement;
+  var current = root.getAttribute('data-theme');
+  var next = current === 'light' ? 'dark' : 'light';
+  root.setAttribute('data-theme', next);
+  try { localStorage.setItem('dba-theme', next); } catch(e) {}
+}
+(function() {
+  try {
+    var saved = localStorage.getItem('dba-theme');
+    if (saved) document.documentElement.setAttribute('data-theme', saved);
+  } catch(e) {}
+})();
 """
 
 
@@ -183,9 +200,14 @@ def _prefix_ids(html: str, prefix: str) -> str:
 
 
 _SEV_COLOR = {
-    HealthSeverity.OK:       "var(--green)",
-    HealthSeverity.WARNING:  "var(--amber)",
-    HealthSeverity.CRITICAL: "var(--red)",
+    HealthSeverity.OK:       "var(--t3)",
+    HealthSeverity.WARNING:  "var(--t2)",
+    HealthSeverity.CRITICAL: "var(--t1)",
+}
+_SEV_RING_COLOR = {
+    HealthSeverity.OK:       "var(--ring-ok)",
+    HealthSeverity.WARNING:  "var(--ring-warn)",
+    HealthSeverity.CRITICAL: "var(--ring-crit)",
 }
 _SEV_LABEL = {
     HealthSeverity.OK:       "Healthy",
@@ -195,6 +217,29 @@ _SEV_LABEL = {
 
 _LARGE_FLEET_THRESHOLD = 6  # clusters above this count use dropdown instead of tabs
 _TIER_ORDER_MAP = {"P0": 0, "P1": 1, "P2": 2, "P3": 3, "P4": 4}
+
+
+def _sparkline_svg(scores: list, width: int = 64, height: int = 20) -> str:
+    """BL-122: inline SVG sparkline for score history. Returns empty string if < 2 points."""
+    if len(scores) < 2:
+        return ""
+    mn, mx = min(scores), max(scores)
+    span = mx - mn if mx != mn else 1
+    n = len(scores)
+    xs = [round(i * width / (n - 1), 1) for i in range(n)]
+    ys = [round(height - (s - mn) / span * height * 0.85 - height * 0.075, 1) for s in scores]
+    points = " ".join(f"{x},{y}" for x, y in zip(xs, ys))
+    # Colour based on trend: last score vs first
+    trend = scores[-1] - scores[0]
+    colour = "var(--t2)" if trend >= 0 else "var(--t1)"
+    return (
+        f'<svg width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
+        f'style="display:inline-block;vertical-align:middle;margin-left:6px" '
+        f'title="Score trend over last {n} runs">'
+        f'<polyline points="{points}" fill="none" stroke="{colour}" '
+        f'stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>'
+        f'</svg>'
+    )
 
 
 def _top_issue(cr) -> str:
@@ -242,14 +287,127 @@ def _rs_name(cluster_uri: str) -> str:
         return ""
 
 
+import math as _math
+
+def _mini_score_ring(score: int, color: str) -> str:
+    """BL-128: 36px inline score ring for fleet summary table."""
+    r = 14
+    circ = 2 * _math.pi * r
+    off = circ * (1 - score / 100)
+    return (
+        f'<span class="mini-ring">'
+        f'<svg width="36" height="36" viewBox="0 0 36 36">'
+        f'<circle cx="18" cy="18" r="{r}" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="3"/>'
+        f'<circle cx="18" cy="18" r="{r}" fill="none" stroke="{color}" stroke-width="3"'
+        f' stroke-dasharray="{circ:.1f}" stroke-dashoffset="{off:.1f}" stroke-linecap="round"/>'
+        f'</svg>'
+        f'<span class="mini-ring-num" style="color:{color}">{score}</span>'
+        f'</span>'
+    )
+
+
+def _section_heatmap(report: MultiClusterReport, labels: list) -> str:
+    """BL-128: section-level severity heatmap across all clusters."""
+    # Collect all unique section names in order
+    _HEATMAP_SECTIONS = [
+        "Replication Health", "Server Health", "Storage & Capacity",
+        "Backup & Recovery", "Operations", "Connections & Concurrency",
+        "Query Performance", "Missing Indexes", "Unused Indexes",
+    ]
+    _HM_SHORT = {
+        "Replication Health": "Repl",
+        "Server Health": "Server",
+        "Storage & Capacity": "Storage",
+        "Backup & Recovery": "Backup",
+        "Operations": "Ops",
+        "Connections & Concurrency": "Conn",
+        "Query Performance": "Queries",
+        "Missing Indexes": "Miss Idx",
+        "Unused Indexes": "Unused Idx",
+    }
+    _HM_DOT = {
+        HealthSeverity.OK: "hm-ok",
+        HealthSeverity.WARNING: "hm-warn",
+        HealthSeverity.CRITICAL: "hm-crit",
+    }
+
+    headers = "".join(f"<th>{_HM_SHORT.get(s, s[:6])}</th>" for s in _HEATMAP_SECTIONS)
+
+    rows = ""
+    for cr, label in zip(report.clusters, labels):
+        sec_map = {s.name: s.severity for s in cr.sections}
+        cells = ""
+        for sec_name in _HEATMAP_SECTIONS:
+            sev = sec_map.get(sec_name)
+            dot_cls = _HM_DOT.get(sev, "hm-na") if sev else "hm-na"
+            title = f"{sec_name}: {sev.value if sev else 'n/a'}"
+            cells += f'<td><span class="hm-dot {dot_cls}" title="{title}"></span></td>'
+        # Short label
+        display = label
+        rs = _rs_name(cr.cluster_uri)
+        if rs and display.endswith(f"({rs})"):
+            display = display[:-(len(rs) + 3)].strip()
+        rows += f"<tr><td>{display}</td>{cells}</tr>"
+
+    return (
+        f'<div class="heatmap-wrap">'
+        f'<div class="heatmap-title">Section Severity Heatmap</div>'
+        f'<table class="heatmap-table">'
+        f'<thead><tr><th>Cluster</th>{headers}</tr></thead>'
+        f'<tbody>{rows}</tbody>'
+        f'</table>'
+        f'</div>'
+    )
+
+
 def _build_summary_panel(report: MultiClusterReport, labels: list, ts: str) -> str:
-    """Build the fleet summary panel (BL-091) — default first tab."""
+    """Build the fleet summary panel (BL-091 / BL-112) — default first tab."""
     scores = [_health_score(cr) for cr in report.clusters]
 
+    # Fleet aggregate score = minimum (worst cluster determines fleet health)
+    fleet_score = min(scores) if scores else 100
+    fleet_sev_css = _fleet_score_css(fleet_score)
+
+    elapsed_str = (
+        f" &nbsp;·&nbsp; <strong style='color:var(--t2)'>completed in {report.elapsed_seconds:.0f}s</strong>"
+        if report.elapsed_seconds else ""
+    )
     fleet_sub = (
         f"{report.cluster_count} cluster{'s' if report.cluster_count != 1 else ''}"
-        f" · Report generated at {ts}"
+        f" · {ts}"
+        f"{elapsed_str}"
     )
+
+    # BL-112: critical cluster banner — compact, no per-cluster detail (duplicates table)
+    n_crit = sum(1 for cr in report.clusters if cr.overall_severity == HealthSeverity.CRITICAL)
+    n_warn = sum(1 for cr in report.clusters if cr.overall_severity == HealthSeverity.WARNING)
+    if n_crit > 0:
+        banner_html = (
+            f'<div style="background:var(--surface2);border:1px solid var(--border);'
+            f'border-left:3px solid var(--border-em);border-radius:6px;padding:10px 16px;'
+            f'margin-bottom:20px;font-size:13px;color:var(--t1);display:flex;align-items:center;gap:12px;">'
+            f'<strong>{n_crit} cluster{"s" if n_crit != 1 else ""} CRITICAL</strong>'
+            f'<span style="color:var(--t2);font-size:12px;">Immediate action required — see table below</span>'
+            f'</div>'
+        )
+    elif n_warn > 0:
+        banner_html = (
+            f'<div style="background:var(--surface2);border:1px solid var(--border);'
+            f'border-left:3px solid var(--border-em);border-radius:6px;padding:10px 16px;'
+            f'margin-bottom:20px;font-size:13px;color:var(--t1);display:flex;align-items:center;gap:12px;">'
+            f'<strong>{n_warn} cluster{"s" if n_warn != 1 else ""} WARNING</strong>'
+            f'<span style="color:var(--t2);font-size:12px;">Action required this week — see table below</span>'
+            f'</div>'
+        )
+    else:
+        banner_html = (
+            f'<div style="background:var(--surface2);border:1px solid var(--border);'
+            f'border-left:3px solid var(--border-em);border-radius:6px;padding:10px 16px;'
+            f'margin-bottom:20px;font-size:13px;color:var(--t1);display:flex;align-items:center;gap:12px;">'
+            f'<strong>All clusters healthy</strong>'
+            f'<span style="color:var(--t2);font-size:12px;">No action required</span>'
+            f'</div>'
+        )
 
     # Rows sorted by score ascending (worst first)
     rows_data = sorted(
@@ -266,23 +424,17 @@ def _build_summary_panel(report: MultiClusterReport, labels: list, ts: str) -> s
         top       = _top_issue(cr)
         n_recs    = len(cr.recommendations)
         score_cls = _score_css(score)
-        rs        = _rs_name(cr.cluster_uri)
-        # Strip "(rs_name)" suffix from label when we show it separately below
         display_label = label
-        if rs and display_label.endswith(f"({rs})"):
-            display_label = display_label[:-(len(rs) + 3)].strip()
-        rs_tag = f'<div class="rs-tag">Replica set: {rs}</div>' if rs else ""
+        # BL-128: mini score ring — uses ring color (the ONE accent)
+        ring_color = _SEV_RING_COLOR[cr.overall_severity]
+        ring_html = _mini_score_ring(score, ring_color)
         rows_html += (
             f'<tr onclick="switchCluster({tab_idx})" style="cursor:pointer">'
-            f'<td class="cluster-name-cell">'
-            f'<span class="tab-dot {sev_dot} cluster-dot"></span>{display_label}'
-            f'{rs_tag}'
-            f'</td>'
-            f'<td class="score-cell {score_cls}">{score}<span class="score-unit"> /100</span></td>'
-            f'<td class="sev-cell" style="color:{sev_color}">{sev_label}</td>'
+            f'<td class="cluster-name-cell">{display_label}</td>'
+            f'<td class="score-cell">{ring_html}</td>'
             f'<td class="top-issue-cell">{top}</td>'
             f'<td class="n-actions-cell">{n_recs}</td>'
-            f'<td><a class="view-link" href="#" onclick="switchCluster({tab_idx}); return false;">View →</a></td>'
+            f'<td><a class="view-link" href="#" onclick="switchCluster({tab_idx}); return false;">View</a></td>'
             f'</tr>'
         )
 
@@ -292,9 +444,10 @@ def _build_summary_panel(report: MultiClusterReport, labels: list, ts: str) -> s
         f'<div class="summary-title">MongoDB Fleet Health Report</div>'
         f'<div class="summary-sub">{fleet_sub}</div>'
         f'</div>'
+        f'{banner_html}'
         f'<table class="summary-table">'
         f'<thead><tr>'
-        f'<th>Cluster</th><th>Score</th><th>Severity</th><th>Top Issue</th><th>Actions</th><th></th>'
+        f'<th>Cluster</th><th>Score</th><th>Top Issue</th><th>Actions</th><th></th>'
         f'</tr></thead>'
         f'<tbody>{rows_html}</tbody>'
         f'</table>'
@@ -340,14 +493,13 @@ def render_multi_html(report: MultiClusterReport) -> str:
             )
         nav_html = "".join(tab_buttons)
 
-    # Identity label — starts as "Fleet Summary" (BL-079)
+    # Theme toggle in the right side of tab bar
     identity_html = (
         f'<div class="tab-spacer"></div>'
-        f'<div class="tab-identity">'
-        f'<span class="tab-id-label">Viewing</span>'
-        f'<span class="tab-dot" id="tab-id-dot"></span>'
-        f'<span class="tab-id-name" id="tab-id-name">Fleet Summary</span>'
-        f'<span style="color:var(--t2); font-size:11px; font-family:var(--mono);" id="tab-id-sev"></span>'
+        f'<div style="display:flex;align-items:center;gap:8px;margin-right:12px;flex-shrink:0">'
+        f'<span class="toggle-label" style="font-size:11px;color:var(--t3)">Dark</span>'
+        f'<button class="pill-toggle" onclick="toggleTheme()" title="Toggle light/dark mode"></button>'
+        f'<span class="toggle-label" style="font-size:11px;color:var(--t3)">Light</span>'
         f'</div>'
     )
 
@@ -358,7 +510,7 @@ def render_multi_html(report: MultiClusterReport) -> str:
     for i, cr in enumerate(report.clusters):
         meta_entries.append(
             f'{{name:{repr(labels[i])},dotCls:{repr(_SEV_DOT[cr.overall_severity])},'
-            f'sevLabel:{repr(_SEV_LABEL[cr.overall_severity])},sevColor:{repr(_SEV_COLOR[cr.overall_severity])}}}'
+            f'sevLabel:{repr(_SEV_LABEL[cr.overall_severity])},sevColor:"var(--t1)"}}'
         )
     cluster_meta_js = f"_clusterMeta = [{','.join(meta_entries)}];"
 
@@ -374,15 +526,7 @@ def render_multi_html(report: MultiClusterReport) -> str:
         label  = labels[i]
         n_recs = len(cr.recommendations)
 
-        # Strip "(rsName)" from display label; show RS separately
-        rs = _rs_name(cr.cluster_uri)
         display_label = label
-        if rs and display_label.endswith(f"({rs})"):
-            display_label = display_label[:-(len(rs) + 3)].strip()
-        rs_header_line = (
-            f'<div class="report-sub" style="margin-top:2px">Replica set: {rs}</div>'
-            if rs else ""
-        )
 
         raw_sidebar = _sidebar(cr, score)
         raw_sidebar = raw_sidebar.replace('href="#', f'href="#{pfx}')
@@ -391,23 +535,15 @@ def render_multi_html(report: MultiClusterReport) -> str:
         content_html = _prefix_ids(content_html, pfx)
         recs_html    = _recommendations_html(cr)
         recs_html    = _prefix_ids(recs_html, pfx)
-        status_html  = _status_bar(cr)
-        oh_summary   = _prefix_ids(_overall_health_summary(cr), pfx)
-        explainer    = _prefix_ids(_rating_explainer(cr), pfx)
 
         pane = (
             f'<main class="main">'
             f'<div class="report-header">'
             f'<div class="report-title">MongoDB cluster health report</div>'
             f'<div class="report-cluster">{display_label}</div>'
-            f'{rs_header_line}'
-            f'<div class="report-sub" style="margin-top:4px">Report generated at {ts} &middot; Run&thinsp;{report.run_id} &middot; {len(cr.sections)} sections &middot; '
-            f'{n_recs} recommendation{"s" if n_recs != 1 else ""}</div>'
+            f'<div class="report-sub" style="margin-top:4px">{ts}</div>'
             f'</div>'
-            f'{oh_summary}'
-            f'{explainer}'
             f'{recs_html}'
-            f'{status_html}'
             f'{content_html}'
             f'<div class="report-footer">mongodb-dba-agent · {display_label} · {ts}</div>'
             f'</main>'

@@ -28,6 +28,7 @@ class Signal:
     unit: str = ""
     threshold: Optional[Any] = None
     tooltip: Optional[str] = None   # static definition or LLM-contextual interpretation
+    trend: Optional[str] = None     # BL-114: "up" | "down" | "stable" | None (None = no history)
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {"name": self.name, "value": self.value}
@@ -37,6 +38,8 @@ class Signal:
             d["threshold"] = self.threshold
         if self.tooltip:
             d["tooltip"] = self.tooltip
+        if self.trend:
+            d["trend"] = self.trend
         return d
 
 
@@ -90,6 +93,8 @@ class HealthCheckReport:
     agent_version: str = ""     # BL-087: version of this agent (from __version__)
     om_version: str = ""        # BL-087: Ops Manager version (empty if OM not configured)
     health_summary: str = ""    # LLM-generated natural language health summary
+    score_history: List[int] = field(default_factory=list)  # BL-122: last N health scores for sparkline
+    elapsed_seconds: float = 0.0                            # wall-clock run time for display
 
     def to_dict(self) -> Dict[str, Any]:
         d = {

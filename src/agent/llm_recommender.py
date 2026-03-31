@@ -29,10 +29,12 @@ logger = logging.getLogger(__name__)
 # Signals where a value BELOW the threshold is the problem (low = bad).
 # All other threshold signals: value ABOVE the threshold is the problem (high = bad).
 _BELOW_THRESHOLD_IS_BAD = frozenset({
-    "wt_cache_hit_ratio",   # low hit rate = reads hitting disk
-    "tickets_reads",        # low remaining tickets = read exhaustion
-    "tickets_writes",       # low remaining tickets = write stall
-    "oplog_window_hours",   # short window = secondary sync risk
+    "wt_cache_hit_ratio",      # low hit rate = reads hitting disk
+    "tickets_reads",           # low remaining tickets = read exhaustion
+    "tickets_writes",          # low remaining tickets = write stall
+    "oplog_window_hours",      # short window = secondary sync risk
+    "oplog_window_for_pitr",   # short window = PITR gap between backups
+    "plan_cache_hit_rate_pct", # low hit rate = frequent re-planning
 })
 
 

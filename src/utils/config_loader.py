@@ -119,6 +119,11 @@ class ThresholdsConfig(BaseModel):
     # Index analysis
     full_scan_examined_min: int        = 1000
     full_scan_selectivity_max: float   = 0.01
+    # Operations — plan cache (MongoDB 7.0+)
+    plan_cache_hit_rate_warning: float  = 80.0
+    plan_cache_hit_rate_critical: float = 50.0
+    # Backup & Recovery (BL-106/107)
+    backup_interval_hours: float = 24.0
 
 
 class DemoConfig(BaseModel):

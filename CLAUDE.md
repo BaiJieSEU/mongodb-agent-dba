@@ -108,14 +108,17 @@ Produces a `HealthCheckReport` saved as JSON + HTML + Markdown to `reports/`.
 
 | # | Section | Data source | Backlog |
 |---|---|---|---|
-| 1 | Cluster Overview | MCP: `list-databases`, `list-collections` | — |
-| 2 | Server Health | MCP: `find` on `local.startup_log`, `db-stats` | BL-001 ✅ |
-| 3 | Replication Health | MCP: `find` on `local.system.replset`, `local.oplog.rs` | BL-002 ✅ |
-| 4 | Storage & Capacity | MCP: `db-stats`, `collection-storage-size`, `count` | BL-003 ✅ |
-| 5 | Query Performance | MCP: `find` on `<db>.system.profile` per discovered database | — |
-| 6 | Missing Indexes | MCP: `collection-indexes` on top slow collections | — |
-| 7 | Unused Indexes | MCP: `aggregate $indexStats` per collection across all databases | BL-004 ✅ |
-| 8 | Operations | Direct PyMongo: `admin.command("serverStatus")` | BL-009 ✅ |
+| 1  | Cluster Overview | MCP: `list-databases`, `list-collections` | — |
+| 2  | Server Health | MCP: `find` on `local.startup_log`, `db-stats` | BL-001 ✅ |
+| 3  | Replication Health | MCP: `find` on `local.system.replset`, `local.oplog.rs` + direct `replSetGetStatus` | BL-002 ✅ BL-094 ✅ |
+| 4  | Storage & Capacity | MCP: `db-stats`, `collection-storage-size`, `count` | BL-003 ✅ BL-095 ✅ |
+| 5  | Query Performance | MCP: `find` on `<db>.system.profile` per discovered database | BL-093 ✅ BL-102 ✅ |
+| 6  | Missing Indexes | MCP: `collection-indexes` on top slow collections | BL-101 ✅ |
+| 7  | Unused Indexes | MCP: `aggregate $indexStats` per collection across all databases | BL-004 ✅ BL-096 ✅ |
+| 8  | Operations | Direct PyMongo: `admin.command("serverStatus")` | BL-009 ✅ BL-097 ✅ BL-098 ✅ BL-099 ✅ BL-103 ✅ |
+| 9  | Backup & Recovery | Direct PyMongo: `serverStatus.storageEngine.backupCursorOpen` + oplog window | BL-106 ✅ BL-107 ✅ |
+| 10 | Connections & Concurrency | OM API (placeholder when OM not configured) | BL-013 ✅ |
+| 11 | Infrastructure | OM API (placeholder when OM not configured) | BL-015 ✅ |
 
 **Dual data-access pattern (§8):**
 `serverStatus` is a read-only admin command not in the MCP Server's toolset.

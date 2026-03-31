@@ -70,6 +70,9 @@ _THRESHOLDS_DEFAULTS = {
     "replication_lag_critical_sec": 60,
     "long_running_op_warning_sec": 5,
     "long_running_op_critical_sec": 60,
+    "plan_cache_hit_rate_warning": 80.0,
+    "plan_cache_hit_rate_critical": 50.0,
+    "backup_interval_hours": 24.0,
     "memory_resident_warning_mb": 4096,
     "memory_resident_critical_mb": 8192,
     "connections_warning": 500,
@@ -109,7 +112,8 @@ class HealthCheckRunner:
     # ── public entry point ─────────────────────────────────────────────────────
 
     def run(self) -> HealthCheckReport:
-        run_id = f"hc_{int(time.time())}"
+        _run_start = time.time()
+        run_id = f"hc_{int(_run_start)}"
         timestamp = datetime.utcnow()
         sections: List[ReportSection] = []
         slow_queries: List[Dict[str, Any]] = []
@@ -136,6 +140,10 @@ class HealthCheckRunner:
                 om_cfg.url, om_cfg.group_id, om_cfg.public_key, om_cfg.private_key
             )
 
+        # Shared state written by one section and read by another
+        self._oplog_window_hours: Optional[float] = None  # set by §3, read by §Backup
+        self._low_cardinality_fields: Dict[str, Any] = {}  # set by BL-101, read by _build_recommendations
+
         try:
             with MCPClient(self._cluster_uri) as mcp:
                 self._mcp = mcp
@@ -154,14 +162,18 @@ class HealthCheckRunner:
                 sections.append(self._section_index_health(top_colls))
                 usage_section, unused_indexes = self._section_index_usage(user_dbs)  # BL-004
                 sections.append(usage_section)
+                # BL-101: cardinality pre-compute (inside MCP block — uses self._mcp.aggregate)
+                self._precompute_cardinality(slow_queries)
 
                 self._mcp = None
 
             # §8 Operations — direct PyMongo serverStatus (BL-009)
             sections.append(self._section_operations())
-            # §9 Connections & Concurrency — OM API (BL-013)
+            # §9 Backup & Recovery (BL-106/107)
+            sections.append(self._section_backup_recovery())
+            # §10 Connections & Concurrency — OM API (BL-013)
             sections.append(self._section_connections())
-            # §10 Infrastructure — OM API (BL-015)
+            # §11 Infrastructure — OM API (BL-015)
             sections.append(self._section_infrastructure())
         finally:
             self._mongo.close_connections()
@@ -196,8 +208,18 @@ class HealthCheckRunner:
             logger.info("Generating LLM health summary")
             report.health_summary = llm_rec.generate_health_summary(report)
 
+        # BL-114: attach trend arrows to tracked signals (after baseline load, before save)
+        self._attach_trends(report)
+
         # BL-021: persist this run's metrics for future baseline comparisons
-        self._baseline.record_from_report(report)
+        # BL-122: also persist health score for sparkline history
+        from utils.html_reporter import _health_score
+        current_score = _health_score(report)
+        self._baseline.record_from_report(report, score=current_score)
+        # Attach score history to report so fleet renderer can draw sparkline
+        report.score_history = self._baseline.score_history()
+        # Wall-clock run time
+        report.elapsed_seconds = round(time.time() - _run_start, 1)
 
         if self._save_report_flag:
             report.report_path = str(self._save_report(report))
@@ -213,21 +235,18 @@ class HealthCheckRunner:
             collections_by_db[db] = [c for c in colls if not c.startswith("system.")]
 
         total_colls = sum(len(v) for v in collections_by_db.values())
-        # Show DB names (not in metric cards) but not collection lists (too noisy for overview)
-        findings = [
-            f"User database{'s' if len(user_dbs) != 1 else ''}: "
-            + ", ".join(
-                f"{db} ({len(colls)} collection{'s' if len(colls) != 1 else ''})"
-                for db, colls in collections_by_db.items()
-            )
-        ]
+
+        findings = []
+        for db, colls in collections_by_db.items():
+            coll_list = ", ".join(colls) if colls else "(empty)"
+            findings.append(f"{db}: {coll_list}")
 
         return ReportSection(
             name="Cluster Overview",
             severity=HealthSeverity.OK,
             signals=[
-                Signal("database_count", len(user_dbs), "databases"),
-                Signal("collection_count", total_colls, "collections"),
+                Signal("database_count", len(user_dbs)),
+                Signal("collection_count", total_colls),
             ],
             findings=findings,
         )
@@ -432,16 +451,17 @@ class HealthCheckRunner:
                     f"  {members_down} member(s) reported as DOWN — cluster may be degraded."
                 )
             if lag_per_member:
+                lag_fmt = self._fmt_duration(max_lag_sec)
+                warn_fmt = self._fmt_duration(self._thresholds["replication_lag_warning_sec"])
+                crit_fmt = self._fmt_duration(self._thresholds["replication_lag_critical_sec"])
                 if max_lag_sec >= self._thresholds["replication_lag_critical_sec"]:
                     findings.append(
-                        f"  Max replication lag ({max_lag_sec:.1f}s) exceeds critical threshold "
-                        f"({self._thresholds['replication_lag_critical_sec']}s) — "
-                        f"secondary(ies) at risk of oplog gap."
+                        f"  Max replication lag ({lag_fmt}) exceeds critical threshold "
+                        f"({crit_fmt}) — secondary(ies) at risk of oplog gap."
                     )
                 elif max_lag_sec >= self._thresholds["replication_lag_warning_sec"]:
                     findings.append(
-                        f"  Replication lag ({max_lag_sec:.1f}s) exceeds warning threshold "
-                        f"({self._thresholds['replication_lag_warning_sec']}s)."
+                        f"  Replication lag ({lag_fmt}) exceeds warning threshold ({warn_fmt})."
                     )
 
         if oplog_window_hours is not None:
@@ -454,16 +474,22 @@ class HealthCheckRunner:
                     f"risk of replication failure after extended secondary downtime."
                 )
 
-        signals: List[Signal] = [Signal("replica_set_members", len(members), "members")]
+        signals: List[Signal] = [Signal("replica_set_members", len(members))]
         if oplog_window_hours is not None:
             signals.append(Signal("oplog_window_hours", oplog_window_hours, "hours",
                                   self._thresholds["oplog_window_warning_hours"]))
         if rs_status_members:
-            signals.append(Signal("members_up",   members_up,   "members"))
-            signals.append(Signal("members_down", members_down, "members", 0))
+            signals.append(Signal("members_up",   members_up))
+            signals.append(Signal("members_down", members_down, "", 0))
         if lag_per_member:
-            signals.append(Signal("replication_lag_max_sec", round(max_lag_sec, 1), "s",
+            # BL-115: display as human-readable duration (value stays in seconds for threshold comparison)
+            lag_display = self._fmt_duration(max_lag_sec)
+            signals.append(Signal("replication_lag_max_sec", lag_display,
+                                  "",   # unit embedded in display value
                                   self._thresholds["replication_lag_warning_sec"]))
+
+        # BL-107: store for Backup & Recovery section
+        self._oplog_window_hours = oplog_window_hours
 
         return ReportSection(
             name="Replication Health",
@@ -607,6 +633,19 @@ class HealthCheckRunner:
         max_ms = max((q["execution_time_ms"] for q in slow_queries), default=0)
         avg_ms = sum(q["execution_time_ms"] for q in slow_queries) / count if count else 0.0
 
+        # BL-102: aggregation pipeline anti-patterns from profiler entries
+        slow_agg_count = 0
+        agg_antipatterns: List[str] = []
+        for q in slow_queries:
+            cmd = q.get("query", {})
+            if isinstance(cmd, dict) and "aggregate" in cmd:
+                slow_agg_count += 1
+                pipeline = cmd.get("pipeline", [])
+                for issue in self._detect_pipeline_antipatterns(pipeline):
+                    ns_str = f"{q.get('db', '')}.{q.get('collection', '')}: {issue}"
+                    if ns_str not in agg_antipatterns:
+                        agg_antipatterns.append(ns_str)
+
         # Percentage of profiled queries that were slow (same window — both from system.profile)
         slow_pct = round(count / total_profiled * 100, 1) if total_profiled > 0 else 0.0
 
@@ -645,45 +684,51 @@ class HealthCheckRunner:
         if count == 0:
             findings.append(f"No slow queries above {threshold}ms — profiler is active.")
         else:
-            pct_note_str = f"  {_pct_note}" if _pct_note else ""
-            ms_note_str  = f"  {_ms_note}"  if _ms_note  else ""
-            findings.append(
-                f"{count} slow op(s) ({slow_pct}% of {total_profiled} profiled){pct_note_str}"
-                f"  ·  threshold: {threshold}ms"
-                f"  ·  max: {max_ms}ms{ms_note_str}  ·  avg: {avg_ms:.0f}ms"
+            # ── BL-085: clean summary headline ──────────────────────────────
+            collscan_str = f" — {collscan_count} COLLSCAN" if collscan_count else ""
+            spill_str    = (
+                f" — {sort_spill_count} sort spill(s) to disk ({total_spill_bytes // 1024} KB)"
+                if sort_spill_count else ""
             )
             findings.append(
-                f"{collscan_count} of {count} op(s) used COLLSCAN (no index)  "
-                f"·  {sort_stage_count} required in-memory sort stage"
-                + (f"  ·  {sort_spill_count} sort(s) spilled to disk "
-                   f"({total_spill_bytes / 1024:.0f} KB)" if sort_spill_count else "")
+                f"{count} slow queries ({slow_pct}% of {total_profiled} profiled)"
+                f"{collscan_str}{spill_str}"
+                f"  ·  threshold: {threshold} ms  ·  max: {max_ms} ms  ·  avg: {avg_ms:.0f} ms"
             )
+            if collscan_count:
+                findings.append(
+                    f"{collscan_count} of {count} operation(s) scanned the entire collection "
+                    f"(COLLSCAN) — each is a candidate for an index."
+                )
             if sort_spill_count:
                 findings.append(
-                    f"  Sort spills detected — queries exceeded in-memory sort buffer. "
-                    f"Add indexes that cover the sort field to eliminate in-memory sorting."
+                    f"Sort spills detected — {sort_spill_count} query/queries exceeded the "
+                    f"100 MB in-memory sort limit. Add indexes covering the sort field to eliminate spills."
                 )
-            findings.append("")
-            for coll, qs in sorted(by_coll.items(), key=lambda x: -len(x[1])):
+            # ── BL-085: per-collection detail block (collapsible via BL-083) ──
+            # Suppress collections where docs_examined == 0 AND plan unknown (profiler noise)
+            for coll, qs in sorted(by_coll.items(), key=lambda x: -max(q["execution_time_ms"] for q in x[1])):
                 c_max    = max(q["execution_time_ms"] for q in qs)
                 c_avg    = sum(q["execution_time_ms"] for q in qs) / len(qs)
-                c_exam   = max(q["docs_examined"] for q in qs)
-                c_ret    = max(q["docs_returned"] for q in qs) if any(q["docs_returned"] for q in qs) else 0
-                c_keys   = max(q["keys_examined"] for q in qs)
+                c_exam   = max(q["docs_examined"]   for q in qs)
+                c_ret    = max((q["docs_returned"]   for q in qs), default=0)
+                c_keys   = max(q["keys_examined"]   for q in qs)
                 c_plans  = {q["plan_summary"] for q in qs if q["plan_summary"]}
                 c_sorts  = sum(1 for q in qs if q["has_sort_stage"])
-                # Targeting ratio: docs scanned per doc returned (lower = better)
+                plan_str = " / ".join(sorted(c_plans)) if c_plans else "unknown"
+                # BL-085: skip zero-examination unknown-plan entries (profiler internal ops)
+                if c_exam == 0 and plan_str == "unknown":
+                    continue
                 targeting = round(c_exam / c_ret, 1) if c_ret else float("inf")
                 targeting_str = f"{targeting:,.0f}×" if targeting != float("inf") else "∞"
-                plan_str = " / ".join(sorted(c_plans)) if c_plans else "unknown"
-                sort_str = f"  sort stage: {c_sorts}/{len(qs)} op(s)" if c_sorts else ""
+                sort_note = f"  sort: {c_sorts}/{len(qs)}" if c_sorts else ""
+                # Use double-space prefix so BL-083 puts these into the <details> block
                 findings.append(
-                    f"  {coll}  [{len(qs)} op(s)  max {c_max}ms  avg {c_avg:.0f}ms]"
+                    f"  {coll}  [{len(qs)} slow op(s)  max {c_max} ms  avg {c_avg:.0f} ms]"
                 )
                 findings.append(
-                    f"    plan: {plan_str}  ·  "
-                    f"docs examined: {c_exam:,}  ·  keys examined: {c_keys:,}  ·  "
-                    f"targeting ratio: {targeting_str}{sort_str}"
+                    f"  plan: {plan_str}  ·  docs examined: {c_exam:,}  ·  "
+                    f"keys examined: {c_keys:,}  ·  targeting: {targeting_str}{sort_note}"
                 )
 
         # BL-006: profiler findings
@@ -700,25 +745,38 @@ class HealthCheckRunner:
                 f"fast queries not captured; lower slowms to ≤ 100 for better coverage."
             )
 
+        # BL-102: surface aggregation anti-patterns in findings
+        if agg_antipatterns:
+            severity = worst_severity([severity, HealthSeverity.WARNING])
+            findings.append(
+                f"  {len(agg_antipatterns)} aggregation pipeline anti-pattern(s) detected:"
+            )
+            for issue in agg_antipatterns[:5]:
+                findings.append(f"    {issue}")
+            if len(agg_antipatterns) > 5:
+                findings.append(f"    … and {len(agg_antipatterns) - 5} more.")
+
         # BL-100: profiler slowms as explicit signal
         max_slowms = max(profiler_slowms_values, default=0)
 
         signals = [
             Signal("slow_query_pct",     slow_pct,         "%",       self._thresholds["slow_query_pct_warning"]),
-            Signal("slow_query_count",   count,            "queries"),   # info only — no threshold
-            Signal("total_profiled",     total_profiled,   "queries"),   # denominator context
-            Signal("collscan_count",      collscan_count,   "queries", 0),
-            Signal("sort_stage_count",    sort_stage_count, "queries", 0),
-            Signal("sort_spill_count",    sort_spill_count, "queries", 0),
+            Signal("slow_query_count",   count),
+            Signal("total_profiled",     total_profiled),
+            Signal("collscan_count",      collscan_count,   "", 0),
+            Signal("sort_stage_count",    sort_stage_count, "", 0),
+            Signal("sort_spill_count",    sort_spill_count, "", 0),
             Signal("max_execution_ms",    max_ms,           "ms",      self._thresholds["slow_query_ms_warning"]),
             Signal("avg_execution_ms",    round(avg_ms, 1), "ms"),
         ]
         if max_slowms > 0:
             signals.append(Signal("profiler_slowms", max_slowms, "ms", 100))
+        if slow_agg_count > 0:
+            signals.append(Signal("slow_aggregation_count", slow_agg_count, "", 0))
         if profiler_off_dbs:
-            signals.append(Signal("profiler_disabled_dbs", len(profiler_off_dbs), "databases", 0))
+            signals.append(Signal("profiler_disabled_dbs", len(profiler_off_dbs), "", 0))
         if profiler_high_ms_dbs:
-            signals.append(Signal("profiler_high_slowms_dbs", len(profiler_high_ms_dbs), "databases", 0))
+            signals.append(Signal("profiler_high_slowms_dbs", len(profiler_high_ms_dbs), "", 0))
 
         return ReportSection(
             name="Query Performance",
@@ -770,8 +828,8 @@ class HealthCheckRunner:
             name="Missing Indexes",
             severity=severity,
             signals=[
-                Signal("collections_checked",       len(collections),    "collections"),
-                Signal("under_indexed_collections", len(under_indexed),  "collections", 0),
+                Signal("collections_checked",       len(collections)),
+                Signal("under_indexed_collections", len(under_indexed),  "", 0),
             ],
             findings=findings,
         )
@@ -922,11 +980,11 @@ class HealthCheckRunner:
             )
 
         signals = [
-            Signal("total_indexes",       len(all_indexes),  "indexes"),
-            Signal("exact_duplicates",    len(exact_dupes),  "indexes", 0),
-            Signal("unused_indexes",      len(unused),       "indexes", 0),
-            Signal("redundant_indexes",   len(redundant),    "indexes", 0),
-            Signal("used_indexes",        len(used),         "indexes"),
+            Signal("total_indexes",       len(all_indexes)),
+            Signal("exact_duplicates",    len(exact_dupes),  "", 0),
+            Signal("unused_indexes",      len(unused),       "", 0),
+            Signal("redundant_indexes",   len(redundant),    "", 0),
+            Signal("used_indexes",        len(used)),
         ]
 
         return ReportSection(
@@ -999,13 +1057,36 @@ class HealthCheckRunner:
                 f"  Resident memory ({rss_mb:,} MB) is elevated — monitor for growth."
             )
 
-        # ── Page faults ─────────────────────────────────────────────────────────
+        # ── Page faults (BL-098) ────────────────────────────────────────────────
         # Cumulative since restart — any healthy server will have some.
-        # Shown as info only; severity driven by baseline deviation, not raw count.
+        # Baseline-aware: flag if current run is significantly above cluster norm.
         extra = ss.get("extra_info", {})
         page_faults = int(extra.get("page_faults", 0))
         if page_faults > 0:
             signals.append(Signal("page_faults", page_faults, "faults (cumulative)"))
+            pf_sev, pf_note = self._baseline.assess(
+                "page_faults", float(page_faults),
+                higher_is_worse=True,
+            )
+            if pf_sev != HealthSeverity.OK:
+                severities.append(pf_sev)
+                findings.append(
+                    f"  Page faults ({page_faults:,}) are elevated vs cluster baseline "
+                    f"({pf_note}) — working set may not fit in RAM."
+                )
+
+        # ── Network throughput (BL-099) ─────────────────────────────────────────
+        network = ss.get("network", {})
+        bytes_in  = int(network.get("bytesIn",  0))
+        bytes_out = int(network.get("bytesOut", 0))
+        net_in_mb  = round(bytes_in  / 1_048_576, 1)
+        net_out_mb = round(bytes_out / 1_048_576, 1)
+        if net_in_mb > 0 or net_out_mb > 0:
+            signals.append(Signal("network_bytes_in_mb",  net_in_mb,  "MB (cumulative)"))
+            signals.append(Signal("network_bytes_out_mb", net_out_mb, "MB (cumulative)"))
+            findings.append(
+                f"Network since restart: {net_in_mb:,.0f} MB in  {net_out_mb:,.0f} MB out"
+            )
 
         # ── WiredTiger cache ────────────────────────────────────────────────────
         wt_cache = ss.get("wiredTiger", {}).get("cache", {})
@@ -1073,6 +1154,32 @@ class HealthCheckRunner:
                 f"  Lock wait percentage ({lock_wait_pct:.1f}%) exceeds warning threshold "
                 f"({self._thresholds['lock_wait_pct_warning']}%) — watch for concurrency issues."
             )
+
+        # ── BL-103: Plan cache hit rate ─────────────────────────────────────────
+        # MongoDB 8.0+: metrics.query.planCache.classic.{hits,misses}
+        # MongoDB 7.0:  metrics.queryPlanner.{planCacheHits,planCacheMisses}
+        _qp_new  = ss.get("metrics", {}).get("query", {}).get("planCache", {})
+        _classic = _qp_new.get("classic", {})
+        _qp_old  = ss.get("metrics", {}).get("queryPlanner", {})
+        pc_hits   = int(_classic.get("hits",   0) or _qp_old.get("planCacheHits",   0))
+        pc_misses = int(_classic.get("misses", 0) or _qp_old.get("planCacheMisses", 0))
+        if pc_hits + pc_misses > 0:
+            plan_cache_hit_rate = round(pc_hits / (pc_hits + pc_misses) * 100, 1)
+            signals.append(Signal("plan_cache_hit_rate_pct", plan_cache_hit_rate, "%",
+                                   self._thresholds["plan_cache_hit_rate_warning"]))
+            if plan_cache_hit_rate < self._thresholds["plan_cache_hit_rate_critical"]:
+                severities.append(HealthSeverity.CRITICAL)
+                findings.append(
+                    f"  Plan cache hit rate critically low ({plan_cache_hit_rate:.1f}%) — "
+                    f"queries are re-planning on most executions. Review query shape stability and index changes."
+                )
+            elif plan_cache_hit_rate < self._thresholds["plan_cache_hit_rate_warning"]:
+                severities.append(HealthSeverity.WARNING)
+                findings.append(
+                    f"  Plan cache hit rate ({plan_cache_hit_rate:.1f}%) is below the "
+                    f"{self._thresholds['plan_cache_hit_rate_warning']}% warning threshold — "
+                    f"query re-planning is elevated; check for schema or index churn."
+                )
 
         # ── BL-097: Active long-running operations ──────────────────────────────
         long_ops = self._mongo.get_current_op(
@@ -1146,10 +1253,80 @@ class HealthCheckRunner:
             findings=findings,
         )
 
-    # ── Section 9: Connections & Concurrency (BL-013) — OM API ─────────────────
+    # ── Section 9: Backup & Recovery (BL-106/107) ──────────────────────────────
+
+    def _section_backup_recovery(self) -> ReportSection:
+        """BL-106: detect active backup cursor; BL-107: assess PITR coverage via oplog window."""
+        if self._mongo is None:
+            return ReportSection(
+                name="Backup & Recovery",
+                severity=HealthSeverity.WARNING,
+                signals=[],
+                findings=["serverStatus unavailable — backup status check skipped."],
+            )
+
+        ss = self._mongo.get_server_status()
+        if ss is None:
+            return ReportSection(
+                name="Backup & Recovery",
+                severity=HealthSeverity.WARNING,
+                signals=[],
+                findings=["serverStatus command unavailable — backup status check skipped."],
+            )
+
+        severities: List[HealthSeverity] = [HealthSeverity.OK]
+        findings:   List[str]            = []
+        signals:    List[Signal]         = []
+
+        # BL-106: backupCursorOpen — True when a backup agent or manual backup is active
+        storage_engine   = ss.get("storageEngine", {})
+        backup_cursor_open = bool(storage_engine.get("backupCursorOpen", False))
+        signals.append(Signal("backup_cursor_open", int(backup_cursor_open), ""))
+        if backup_cursor_open:
+            findings.append(
+                "Active backup cursor detected — a backup process is connected and running."
+            )
+        else:
+            severities.append(HealthSeverity.WARNING)
+            findings.append(
+                "No active backup cursor (backupCursorOpen=false) — verify that scheduled backups "
+                "are configured (e.g. mongodump cron job, filesystem snapshots, or a third-party tool)."
+            )
+
+        # BL-107: PITR readiness — oplog window must cover the backup interval
+        oplog_hours      = getattr(self, "_oplog_window_hours", None)
+        backup_interval  = self._thresholds["backup_interval_hours"]
+        if oplog_hours is not None:
+            signals.append(Signal("oplog_window_for_pitr", oplog_hours, "hours", backup_interval))
+            if oplog_hours < backup_interval:
+                severities.append(HealthSeverity.WARNING)
+                findings.append(
+                    f"  Oplog window ({oplog_hours}h) is shorter than the backup interval "
+                    f"({backup_interval}h) — point-in-time recovery (PITR) may not be possible "
+                    f"for all gaps between backups."
+                )
+            else:
+                findings.append(
+                    f"  Oplog window ({oplog_hours}h) covers the backup interval ({backup_interval}h) — "
+                    f"PITR is achievable if backups run on schedule."
+                )
+        else:
+            findings.append(
+                "Oplog window could not be determined — PITR coverage cannot be assessed. "
+                "Ensure replication is configured for standalone instances if PITR is required."
+            )
+
+        return ReportSection(
+            name="Backup & Recovery",
+            severity=worst_severity(severities),
+            signals=signals,
+            findings=findings,
+        )
+
+    # ── Section 10: Connections & Concurrency (BL-013) — OM API ─────────────────
 
     def _section_connections(self) -> ReportSection:
-        """§9 — connections, WiredTiger tickets, lock queue per RS member via OM."""
+        """§10 — connections, WiredTiger tickets, lock queue per RS member via OM."""
         _SKIP = ReportSection(
             name="Connections & Concurrency",
             severity=HealthSeverity.OK,
@@ -1367,6 +1544,44 @@ class HealthCheckRunner:
 
     # ── helpers ────────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _fmt_duration(seconds: float) -> str:
+        """BL-115: Human-readable duration — '2h 30m', '45s', '1h 0m'."""
+        s = int(seconds)
+        if s < 60:
+            return f"{s}s"
+        if s < 3600:
+            m, rem = divmod(s, 60)
+            return f"{m}m {rem}s" if rem else f"{m}m"
+        h, rem = divmod(s, 3600)
+        m = rem // 60
+        return f"{h}h {m}m" if m else f"{h}h"
+
+    # Mapping: baseline metric key → (section_name, signal_name, higher_is_worse)
+    _TREND_SIGNAL_MAP: List[tuple] = [
+        ("slow_query_pct",        "Query Performance", "slow_query_pct",            True),
+        ("max_execution_ms",      "Query Performance", "max_execution_ms",           True),
+        ("disk_used_pct",         "Server Health",     "filesystem_disk_used_pct",   True),
+        ("oplog_window_hours",    "Replication Health","oplog_window_hours",          False),
+        ("cache_hit_ratio_pct",   "Operations",        "wt_cache_hit_ratio",          False),
+        ("lock_wait_pct",         "Operations",        "lock_wait_pct",               True),
+        ("cluster_targeting_ratio","Operations",       "cluster_targeting_ratio",     True),
+        ("page_faults",           "Operations",        "page_faults",                 True),
+    ]
+
+    def _attach_trends(self, report: "HealthCheckReport") -> None:
+        """BL-114: Attach trend direction to tracked signals based on baseline history."""
+        if self._baseline.is_cold_start:
+            return
+        sec_map = {s.name: s for s in report.sections}
+        for _bkey, sec_name, sig_name, higher_is_worse in self._TREND_SIGNAL_MAP:
+            section = sec_map.get(sec_name)
+            if not section:
+                continue
+            for sig in section.signals:
+                if sig.name == sig_name and isinstance(sig.value, (int, float)):
+                    sig.trend = self._baseline.trend(_bkey, float(sig.value), higher_is_worse)
+
     def _top_slow_collections(self, slow_queries: List[Dict], n: int = 3) -> List[Dict[str, str]]:
         """Return top-N collections by slow query count as [{"db": ..., "collection": ...}]."""
         counts: Dict[tuple, int] = {}
@@ -1377,6 +1592,41 @@ class HealthCheckRunner:
                 counts[key] = counts.get(key, 0) + 1
         top = sorted(counts.items(), key=lambda x: -x[1])[:n]
         return [{"db": db, "collection": coll} for (db, coll), _ in top]
+
+    @staticmethod
+    def _detect_pipeline_antipatterns(pipeline: list) -> List[str]:
+        """BL-102: return anti-pattern descriptions found in an aggregation pipeline."""
+        issues: List[str] = []
+        if not isinstance(pipeline, list) or not pipeline:
+            return issues
+        stage_names: List[str] = []
+        for stage in pipeline:
+            if isinstance(stage, dict):
+                for k in stage:
+                    stage_names.append(k)
+                    break
+        if not stage_names:
+            return issues
+
+        match_idx  = next((i for i, s in enumerate(stage_names) if s == "$match"),  -1)
+        lookup_idx = next((i for i, s in enumerate(stage_names) if s == "$lookup"), -1)
+        unwind_idx = next((i for i, s in enumerate(stage_names) if s == "$unwind"), -1)
+
+        # $lookup before any $match → join runs on entire collection
+        if lookup_idx >= 0 and (match_idx < 0 or lookup_idx < match_idx):
+            issues.append("$lookup before $match — join on full collection; add $match first")
+        # $unwind before $match → array expansion on all documents
+        if unwind_idx >= 0 and (match_idx < 0 or unwind_idx < match_idx):
+            issues.append("$unwind before $match — array expansion on full collection")
+        # $group as first stage — no index usage possible
+        if stage_names[0] == "$group":
+            issues.append("$group as first stage — full scan required; add $match first if possible")
+        # $sort without subsequent $limit — unbounded in-memory sort
+        for i, s in enumerate(stage_names):
+            if s == "$sort" and "$limit" not in stage_names[i + 1:]:
+                issues.append("$sort without $limit — unbounded in-memory sort; add $limit after $sort")
+                break
+        return issues
 
     # Fields that appear in the profiler command document but are NOT filter fields
     _SKIP_FIELDS = frozenset({
@@ -1400,6 +1650,51 @@ class HealthCheckRunner:
             f for f in filter_obj
             if not f.startswith("$") and f not in HealthCheckRunner._SKIP_FIELDS
         ]
+
+    def _precompute_cardinality(self, slow_queries: List[Dict[str, Any]]) -> None:
+        """BL-101: estimate field cardinality for slow-query collections using $sample.
+
+        Stores results in self._low_cardinality_fields keyed by "db.collection.field".
+        A field is flagged as low-cardinality when < 3% of sampled documents have distinct values.
+        """
+        self._low_cardinality_fields: Dict[str, Dict] = {}
+        if not slow_queries or self._mcp is None:
+            return
+
+        by_coll: Dict[tuple, Dict] = {}
+        for q in slow_queries:
+            coll = q["collection"]
+            db   = q.get("db", "")
+            if coll and not coll.startswith("system."):
+                key = (db, coll)
+                if key not in by_coll:
+                    by_coll[key] = {"db": db, "collection": coll, "fields": set()}
+                for f in self._extract_filter_fields(q.get("query", {})):
+                    by_coll[key]["fields"].add(f)
+
+        SAMPLE_SIZE = 10_000
+        for (db, coll), info in list(by_coll.items())[:5]:  # cap to 5 collections
+            for field in list(info["fields"])[:3]:           # cap to 3 fields each
+                try:
+                    pipeline = [
+                        {"$sample": {"size": SAMPLE_SIZE}},
+                        {"$group": {"_id": f"${field}"}},
+                        {"$count": "distinct_count"},
+                    ]
+                    result = self._mcp.aggregate(db, coll, pipeline)
+                    if result:
+                        distinct = result[0].get("distinct_count", 0)
+                        ratio = distinct / SAMPLE_SIZE
+                        if ratio < 0.03:
+                            self._low_cardinality_fields[f"{db}.{coll}.{field}"] = {
+                                "distinct_ratio": round(ratio, 4),
+                                "sample_size": SAMPLE_SIZE,
+                            }
+                except Exception as exc:
+                    logger.debug(
+                        "BL-101 cardinality check failed for %s.%s.%s: %s",
+                        db, coll, field, exc,
+                    )
 
     def _build_recommendations(
         self,
@@ -1511,19 +1806,35 @@ class HealthCheckRunner:
                 )
                 confidence = "medium"
 
+            # BL-101: downgrade confidence if suggested index fields have low cardinality
+            low_card_note = ""
+            lc_map = getattr(self, "_low_cardinality_fields", {})
+            for field in best_fields:
+                lc_key = f"{db_label}.{coll}.{field}"
+                if lc_key in lc_map:
+                    ratio = lc_map[lc_key]["distinct_ratio"]
+                    confidence  = "low"
+                    low_card_note = (
+                        f" — note: field '{field}' has low cardinality "
+                        f"({ratio * 100:.1f}% distinct), index selectivity will be poor"
+                    )
+                    break
+
             sort_note = (
                 f"; has_sort_stage=true (sort on {sort_fields[0]} done in memory)"
                 if has_sort and sort_fields else
                 f"; has_sort_stage=true" if has_sort else ""
             )
+            evidence_base = (
+                f"{examined:,} docs scanned, {returned} returned ({ms}ms) — {examined / returned:.0f}x targeting ratio, COLLSCAN{sort_note}"
+                if returned else
+                f"COLLSCAN, 0 docs returned{sort_note}"
+            )
             recs.append(Recommendation(
                 priority=_rec_priority("Missing Indexes"),  # P3 → medium
                 collection=fq_coll,
                 action=action,
-                evidence=(
-                    f"{examined:,} docs examined, {returned} returned ({ms}ms) — "
-                    f"targeting ratio {examined / returned:.0f}× · COLLSCAN{sort_note}" if returned else f"targeting ratio ∞× (0 docs returned) · COLLSCAN{sort_note}"
-                ),
+                evidence=evidence_base + low_card_note,
                 confidence=confidence,
             ))
 
@@ -1535,15 +1846,8 @@ class HealthCheckRunner:
                         recs.append(Recommendation(
                             priority=_rec_priority("Replication Health"),  # P0 → high
                             collection="cluster",
-                            action=(
-                                f"Increase oplog size to extend the window above {sig.threshold}h: "
-                                f"db.adminCommand({{replSetResizeOplog: 1, size: 51200}})  "
-                                f"// run on the PRIMARY; current window is {sig.value:.1f}h"
-                            ),
-                            evidence=(
-                                f"oplog_window_hours={sig.value:.1f}h (threshold: {sig.threshold}h) — "
-                                f"a secondary falling more than {sig.value * 60:.0f} min behind will require a full resync"
-                            ),
+                            action=f"db.adminCommand({{replSetResizeOplog: 1, size: 51200}})  // run on PRIMARY",
+                            evidence=f"oplog_window={sig.value:.1f}h < {sig.threshold}h threshold — secondary resync risk",
                             confidence="high",
                         ))
 
@@ -1554,15 +1858,8 @@ class HealthCheckRunner:
                     recs.append(Recommendation(
                         priority=_rec_priority("Query Performance"),  # P3 → medium
                         collection="cluster",
-                        action=(
-                            "Enable profiler on each disabled database: "
-                            "db.setProfilingLevel(1, {slowms: 100})  "
-                            "// run inside each affected database"
-                        ),
-                        evidence=(
-                            f"{sig.value} database(s) have profiler disabled (level 0) — "
-                            "slow queries are not being captured, masking performance problems"
-                        ),
+                        action="db.setProfilingLevel(1, {slowms: 100})  // run on each affected database",
+                        evidence=f"{sig.value} database(s) have profiler disabled — slow queries not captured",
                         confidence="high",
                     ))
 
@@ -1576,10 +1873,7 @@ class HealthCheckRunner:
                 priority=_rec_priority("Unused Indexes"),  # P4 → low
                 collection=f"{db_name}.{coll_name}",
                 action=f'db.{coll_name}.dropIndex("{index_name}")',
-                evidence=(
-                    f'Index "{index_name}" on {db_name}.{coll_name} has 0 accesses since {since} — '
-                    f"consuming write overhead and storage with no read benefit"
-                ),
+                evidence=f'0 accesses since {since} — write overhead with no read benefit',
                 confidence="medium",
             ))
 
@@ -1589,12 +1883,8 @@ class HealthCheckRunner:
             recs.append(Recommendation(
                 priority=_rec_priority("Storage & Capacity"),  # P1 → high
                 collection="cluster",
-                action=(
-                    "Free disk space immediately: remove old report files, compact collections "
-                    "(db.runCommand({compact: '<collection>'})), or expand the volume. "
-                    "Consider enabling TTL indexes to auto-expire old documents."
-                ),
-                evidence=f"filesystem_disk_used_pct={v:.1f}% exceeds {t}% threshold — mongod will stop accepting writes when disk is full",
+                action="db.runCommand({compact: '<collection>'}), expand volume, or add TTL indexes to expire old data",
+                evidence=f"filesystem_disk_used_pct={v:.1f}% exceeds {t}% — writes will stop when disk is full",
                 confidence="high",
             ))
 
@@ -1604,12 +1894,8 @@ class HealthCheckRunner:
             recs.append(Recommendation(
                 priority=_rec_priority("Operations"),  # P1 → high
                 collection="cluster",
-                action=(
-                    "Increase WiredTiger cache size in mongod.conf: "
-                    "storage.wiredTiger.engineConfig.cacheSizeGB: <N>  "
-                    "// set to ~50–60% of available RAM; current hit ratio indicates working set exceeds cache"
-                ),
-                evidence=f"wt_cache_hit_ratio={v:.1f}% is below the {t}% threshold — data reads are bypassing the cache and hitting disk",
+                action="Increase storage.wiredTiger.engineConfig.cacheSizeGB to 50-60% of available RAM",
+                evidence=f"wt_cache_hit_ratio={v:.1f}% below {t}% threshold — reads bypassing cache, hitting disk",
                 confidence="high",
             ))
 
@@ -1619,12 +1905,8 @@ class HealthCheckRunner:
             recs.append(Recommendation(
                 priority=_rec_priority("Operations"),  # P1 → high
                 collection="cluster",
-                action=(
-                    "Reduce memory pressure: lower WiredTiger cache "
-                    "(storage.wiredTiger.engineConfig.cacheSizeGB), add indexes to shrink "
-                    "working set, or add RAM to the host."
-                ),
-                evidence=f"memory_resident_mb={v:.0f} MB exceeds {t:.0f} MB threshold — risk of OS swapping which causes severe latency spikes",
+                action="Lower storage.wiredTiger.engineConfig.cacheSizeGB, add indexes, or add RAM",
+                evidence=f"memory_resident_mb={v:.0f}MB exceeds {t:.0f}MB threshold — swap risk",
                 confidence="high",
             ))
 
@@ -1634,12 +1916,8 @@ class HealthCheckRunner:
             recs.append(Recommendation(
                 priority=_rec_priority("Operations"),  # P1 → high
                 collection="cluster",
-                action=(
-                    "Investigate lock contention: db.currentOp({waitingForLock: true}) "
-                    "to find blocking operations; review long-running writes, "
-                    "large in-place updates, and foreground index builds."
-                ),
-                evidence=f"lock_wait_pct={v:.1f}% exceeds {t}% threshold — operations are spending {v:.1f}% of time waiting for locks",
+                action="db.currentOp({waitingForLock: true}) to find blocking operations",
+                evidence=f"lock_wait_pct={v:.1f}% exceeds {t}% threshold — {v:.1f}% time spent waiting for locks",
                 confidence="high",
             ))
 
@@ -1652,11 +1930,8 @@ class HealthCheckRunner:
             recs.append(Recommendation(
                 priority=_rec_priority("Operations"),  # signal is in Operations → P1
                 collection="cluster",
-                action=(
-                    f"Cluster is scanning {v:.1f} documents per result returned ({t}× threshold). "
-                    "Identify the heaviest scanning collections in Query Performance below and add indexes on frequently filtered fields to eliminate full collection scans."
-                ),
-                evidence=f"cluster_targeting_ratio={v:.1f}× (critical threshold: {t}×) — sustained full scans cause memory pressure and write stalls",
+                action="Add indexes on frequently filtered fields — see Missing Indexes section for specific collections",
+                evidence=f"cluster_targeting_ratio={v:.1f}x vs {t}x threshold — scanning {v:.1f} docs per result causes cache pressure and write stalls",
                 confidence="medium",
             ))
 
@@ -1666,12 +1941,8 @@ class HealthCheckRunner:
             recs.append(Recommendation(
                 priority=_rec_priority("Query Performance"),  # P3 → medium
                 collection="cluster",
-                action=(
-                    "Add indexes that cover sort fields to eliminate in-memory sorts, "
-                    "or set allowDiskUseByDefault: true in mongod.conf for large aggregation sorts. "
-                    "Review queries with sort stages in the profiler."
-                ),
-                evidence=f"sort_spill_count={v} — {v} sort operation(s) exceeded the in-memory sort buffer and spilled to disk, degrading throughput",
+                action="Add indexes covering sort fields, or set allowDiskUseByDefault: true in mongod.conf",
+                evidence=f"sort_spill_count={v} — {v} sort(s) exceeded in-memory buffer and spilled to disk",
                 confidence="high",
             ))
 
@@ -1681,11 +1952,8 @@ class HealthCheckRunner:
             recs.append(Recommendation(
                 priority=_rec_priority("Query Performance", is_critical=False),  # P3 warning → low
                 collection="cluster",
-                action=(
-                    "Lower the profiler slowms threshold to capture more slow queries: "
-                    "db.setProfilingLevel(1, {slowms: 50})  // run on each affected database"
-                ),
-                evidence=f"{v} database(s) have profiler enabled but slowms threshold is too high — queries between 50–100ms are not being captured",
+                action="db.setProfilingLevel(1, {slowms: 50})  // run on each affected database",
+                evidence=f"{v} database(s) have slowms too high — queries between 50-100ms are not captured",
                 confidence="medium",
             ))
 
@@ -1695,12 +1963,8 @@ class HealthCheckRunner:
             recs.append(Recommendation(
                 priority=_rec_priority("Connections & Concurrency"),  # P2 → medium
                 collection="cluster",
-                action=(
-                    "Review connection pool settings: reduce maxPoolSize in application drivers, "
-                    "enable connection pooling if not already used, "
-                    "or run db.currentOp() to identify idle long-lived connections."
-                ),
-                evidence=f"total_connections={v:.0f} exceeds {t:.0f} threshold — high connection count increases memory overhead and scheduling pressure",
+                action="Reduce maxPoolSize in application drivers, or run db.currentOp() to find idle connections",
+                evidence=f"total_connections={v:.0f} exceeds {t:.0f} threshold — memory overhead and scheduling pressure",
                 confidence="medium",
             ))
 
@@ -1710,12 +1974,8 @@ class HealthCheckRunner:
             recs.append(Recommendation(
                 priority=_rec_priority("Operations"),  # P1 → high
                 collection="cluster",
-                action=(
-                    "Investigate long-running read operations: db.currentOp({op: 'query'}) "
-                    "to find queries holding tickets. Add indexes to reduce scan time. "
-                    "If needed: db.adminCommand({setParameter: 1, wiredTigerConcurrentReadTransactions: 256})"
-                ),
-                evidence=f"tickets_reads={v:.0f} remaining (threshold: {t:.0f}) — WiredTiger read concurrency slots are nearly exhausted, new reads will queue",
+                action="db.currentOp({op: 'query'}) to find queries holding tickets; add indexes to reduce scan time",
+                evidence=f"tickets_reads={v:.0f} remaining (threshold: {t:.0f}) — read concurrency slots nearly exhausted",
                 confidence="high",
             ))
 
@@ -1725,12 +1985,8 @@ class HealthCheckRunner:
             recs.append(Recommendation(
                 priority=_rec_priority("Operations"),  # P1 → high
                 collection="cluster",
-                action=(
-                    "Investigate long-running write operations: db.currentOp({op: {$in: ['insert','update','remove']}}) "
-                    "to find writes holding tickets. Batch bulk writes, reduce document size, "
-                    "or add write concern w:0 for non-critical writes."
-                ),
-                evidence=f"tickets_writes={v:.0f} remaining (threshold: {t:.0f}) — WiredTiger write concurrency slots are nearly exhausted, new writes will queue",
+                action="db.currentOp({op: {$in: ['insert','update','remove']}}) to find writes holding tickets; batch bulk writes",
+                evidence=f"tickets_writes={v:.0f} remaining (threshold: {t:.0f}) — write concurrency slots nearly exhausted",
                 confidence="high",
             ))
 
@@ -1740,12 +1996,8 @@ class HealthCheckRunner:
             recs.append(Recommendation(
                 priority=_rec_priority("Infrastructure"),  # P2 → medium
                 collection="cluster",
-                action=(
-                    "Reduce I/O pressure: add indexes to prevent collection scans, "
-                    "increase WiredTiger cache to keep working set in memory, "
-                    "or upgrade to faster storage (NVMe SSD)."
-                ),
-                evidence=f"cpu_iowait_pct={v:.1f}% exceeds {t}% threshold — CPU is spending {v:.1f}% of time waiting for disk I/O",
+                action="Add indexes to reduce scans, increase WiredTiger cache, or upgrade to faster storage (NVMe SSD)",
+                evidence=f"cpu_iowait_pct={v:.1f}% exceeds {t}% threshold — {v:.1f}% CPU time spent waiting on disk I/O",
                 confidence="medium",
             ))
 
@@ -1755,12 +2007,8 @@ class HealthCheckRunner:
             recs.append(Recommendation(
                 priority=_rec_priority("Infrastructure"),  # P2 → medium
                 collection="cluster",
-                action=(
-                    "Prevent OS swapping: reduce WiredTiger cache size "
-                    "(storage.wiredTiger.engineConfig.cacheSizeGB) to leave headroom for the OS, "
-                    "or add RAM. MongoDB performance degrades severely when the OS starts swapping."
-                ),
-                evidence=f"system_memory_used_pct={v:.1f}% exceeds {t}% threshold — system is near memory exhaustion; swapping will cause severe latency spikes",
+                action="Reduce storage.wiredTiger.engineConfig.cacheSizeGB to leave OS headroom, or add RAM",
+                evidence=f"system_memory_used_pct={v:.1f}% exceeds {t}% threshold — swapping causes severe latency spikes",
                 confidence="high",
             ))
 
@@ -1770,16 +2018,57 @@ class HealthCheckRunner:
             recs.append(Recommendation(
                 priority=_rec_priority("Infrastructure"),  # P2 → medium
                 collection="cluster",
-                action=(
-                    "Investigate disk I/O saturation: check iostat/iotop for write pressure, "
-                    "reduce write concurrency, enable journalCompressor: snappy in mongod.conf, "
-                    "or upgrade to faster storage."
-                ),
-                evidence=f"disk_write_latency_ms={v:.1f}ms exceeds {t}ms threshold — elevated write latency increases write concern acknowledgement times",
+                action="Check iostat/iotop for write pressure; enable journalCompressor: snappy, or upgrade storage",
+                evidence=f"disk_write_latency_ms={v:.1f}ms exceeds {t}ms threshold — elevated write latency",
                 confidence="medium",
             ))
 
-        return recs
+        # ── BL-106: no active backup cursor (Backup & Recovery P1) ────────────
+        bc_sig = _sigs.get("backup_cursor_open")
+        if bc_sig is not None and bc_sig.value == 0:
+            recs.append(Recommendation(
+                priority=_rec_priority("Backup & Recovery"),  # P1 → high
+                collection="cluster",
+                action="Configure automated backups (mongodump cron, filesystem snapshots, or Percona Backup)",
+                evidence="backupCursorOpen=false — no backup process connected; data loss risk on failure",
+                confidence="medium",
+            ))
+
+        # ── BL-107: PITR gap — oplog window shorter than backup interval ──────
+        pitr_sig = _sigs.get("oplog_window_for_pitr")
+        if (pitr_sig is not None and pitr_sig.threshold is not None
+                and isinstance(pitr_sig.value, (int, float))
+                and pitr_sig.value < pitr_sig.threshold):
+            v, t = pitr_sig.value, pitr_sig.threshold
+            recs.append(Recommendation(
+                priority=_rec_priority("Backup & Recovery"),  # P1 → high
+                collection="cluster",
+                action=f"db.adminCommand({{replSetResizeOplog: 1, size: 51200}})  // run on PRIMARY",
+                evidence=f"oplog_window={v:.1f}h < backup_interval={t:.0f}h — PITR gap between snapshots",
+                confidence="high",
+            ))
+
+        # ── BL-103: plan cache hit rate low (Operations P2) ──────────────────
+        if _breached_low("plan_cache_hit_rate_pct"):
+            v, t = _val("plan_cache_hit_rate_pct")
+            recs.append(Recommendation(
+                priority=_rec_priority("Operations"),  # P2 → medium
+                collection="cluster",
+                action="Stabilise query shapes: avoid dynamic field names, use parameterised queries",
+                evidence=f"plan_cache_hit_rate_pct={v:.1f}% below {t}% threshold — frequent re-planning adds latency",
+                confidence="medium",
+            ))
+
+        # Deduplicate: same (collection, action) → keep highest priority only
+        _PRI_ORDER = {"P0": 0, "P1": 1, "P2": 2, "P3": 3, "P4": 4}
+        seen: Dict[tuple, Recommendation] = {}
+        for r in recs:
+            key = (r.collection.strip().lower(), r.action.strip().lower())
+            existing = seen.get(key)
+            if existing is None or _PRI_ORDER.get(r.priority, 9) < _PRI_ORDER.get(existing.priority, 9):
+                seen[key] = r
+        deduped = sorted(seen.values(), key=lambda r: _PRI_ORDER.get(r.priority, 9))
+        return deduped
 
     # ── persistence ────────────────────────────────────────────────────────────
 

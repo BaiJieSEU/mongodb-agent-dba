@@ -26,6 +26,7 @@ Tiers are ordered by **worst-case consequence if the issue is left unresolved**.
 | Replication Health         | P0   | Oplog gap → secondary can't resync → data permanently lost if primary fails |
 | Server Health              | P1   | Disk full stops all writes; node failure = cluster unavailable |
 | Storage & Capacity         | P1   | Disk exhaustion halts all writes |
+| Backup & Recovery          | P1   | No backup → unrecoverable data loss on any failure (BL-106/107) |
 | Operations                 | P2   | Ticket exhaustion / cache pressure → requests queue then fail |
 | Connections & Concurrency  | P2   | Connection exhaustion / lock contention → requests rejected |
 | Infrastructure             | P2   | CPU / IO saturation → requests succeed but slowly |
@@ -72,7 +73,7 @@ of the section that produced the finding** — P0 through P4.
 | Priority | Section(s) | When to act |
 |---|---|---|
 | P0 | Replication Health | Immediately — data loss risk |
-| P1 | Server Health, Storage & Capacity | Today — service will go down |
+| P1 | Server Health, Storage & Capacity, Backup & Recovery | Today — service will go down |
 | P2 | Operations, Connections & Concurrency, Infrastructure | This week — service is degraded |
 | P3 | Query Performance, Missing Indexes | Next sprint — queries are slow |
 | P4 | Cluster Overview, Unused Indexes | Backlog — housekeeping |
@@ -83,7 +84,24 @@ A Missing Indexes finding is always P3, regardless of how many collections are a
 
 ---
 
-## 5. AI Summary Alignment
+## 5. Query Performance Threshold Model (BL-093)
+
+Slow query severity is based on **percentage of profiled queries exceeding the threshold**,
+not the raw count. This prevents false positives on high-traffic clusters and false
+negatives on quiet ones.
+
+| Signal | Warning | Critical | Config key |
+|---|---|---|---|
+| `slow_query_pct` | 5.0 % | 20.0 % | `thresholds.slow_query_pct_warning / critical` |
+| `max_execution_ms` | 100 ms | 500 ms | `thresholds.slow_query_ms_warning / critical` |
+
+`slow_query_count` is **informational only** — shown in the metric grid with no threshold.
+Denominator = profiler entries from the same session (not `opcounters.query`, which is
+cumulative since restart and has a different time window).
+
+---
+
+## 6. AI Summary Alignment (BL-090)
 
 The LLM health summary must:
 1. Lead with the **lowest-tier (highest-consequence) breach** present.

@@ -1,16 +1,16 @@
 mongodb:
   agent_store: "mongodb://localhost:27017"
-  monitored_cluster: "mongodb://localhost:27020/?replicaSet=demoRS&directConnection=true"   # backward-compat; mirrors clusters[0]
+  monitored_cluster: "mongodb://localhost:27020/?replicaSet=ecommerceRS&directConnection=true"   # backward-compat; mirrors clusters[0]
   monitored_clusters:
-    - name: "ecommerce (demoRS)"
-      uri: "mongodb://localhost:27020/?replicaSet=demoRS&directConnection=true"
+    - name: "ecommerceRS"
+      uri: "mongodb://localhost:27020/?replicaSet=ecommerceRS&directConnection=true"
       tags:
         - gcp
-    - name: "analytics (analyticsRS)"
+    - name: "analyticsRS"
       uri: "mongodb://localhost:27021/?replicaSet=analyticsRS&directConnection=true"
       tags:
         - gcp
-    - name: "crm (crmRS)"
+    - name: "crmRS"
       uri: "mongodb://localhost:27022/?replicaSet=crmRS&directConnection=true"
       tags:
         - gcp
@@ -106,10 +106,10 @@ thresholds:
 
 ops_manager:
   url: "http://34.31.172.84:8080"
-  group_id: "69c24447d3ee68320e87f1a3"
+  group_id: "69c85b69752bb6698ab542b3"
   # Keys set via env vars only — never commit credentials to YAML:
-  # export OM_API_PUBLIC_KEY=wdeqaago
-  # export OM_API_PRIVATE_KEY=916af6e5-beef-4d0d-8864-4a81736ce7d7
+  # export OM_API_PUBLIC_KEY=bqpkkxhs
+  # export OM_API_PRIVATE_KEY=52dec0cd-081c-425f-b22c-55862d2f927a
 
 logging:
   level: "INFO"

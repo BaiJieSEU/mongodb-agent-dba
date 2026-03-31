@@ -1,7 +1,9 @@
 """MongoDB client utilities"""
 
 import logging
+import re
 from typing import Optional, Dict, Any, List
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from pymongo import MongoClient
 from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure
 from contextlib import contextmanager
@@ -10,12 +12,32 @@ from contextlib import contextmanager
 logger = logging.getLogger(__name__)
 
 
+def _strip_replicaset(uri: str) -> str:
+    """Remove replicaSet parameter from a MongoDB URI.
+
+    When tunnelling via directConnection=true the node doesn't advertise its RS
+    name, so PyMongo raises a ConfigurationError if replicaSet is also present.
+    Stripping it lets PyMongo connect as a standalone direct connection.
+    """
+    parsed = urlparse(uri)
+    qs = parse_qs(parsed.query, keep_blank_values=True)
+    if "replicaSet" not in qs:
+        return uri
+    qs.pop("replicaSet")
+    new_query = urlencode(qs, doseq=True)
+    return urlunparse(parsed._replace(query=new_query))
+
+
 class MongoDBManager:
     """Manages MongoDB connections for both agent store and monitored cluster"""
-    
+
     def __init__(self, agent_store_uri: str, monitored_cluster_uri: str):
         self.agent_store_uri = agent_store_uri
-        self.monitored_cluster_uri = monitored_cluster_uri
+        # Strip replicaSet when directConnection=true to avoid PyMongo mismatch
+        if "directConnection=true" in monitored_cluster_uri:
+            self.monitored_cluster_uri = _strip_replicaset(monitored_cluster_uri)
+        else:
+            self.monitored_cluster_uri = monitored_cluster_uri
         self._agent_store_client: Optional[MongoClient] = None
         self._monitored_client: Optional[MongoClient] = None
     

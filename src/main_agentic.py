@@ -271,6 +271,7 @@ def run_multi_cluster_health_check(config) -> None:
         HealthSeverity.CRITICAL: ("✗ CRITICAL", "bold red"),
     }
 
+    _fleet_start = time.time()
     reports = []
     for cluster in clusters:
         console.print(f"  → [{cluster.name}] {cluster.uri}", style="dim")
@@ -297,6 +298,7 @@ def run_multi_cluster_health_check(config) -> None:
         timestamp=timestamp,
         overall_severity=overall,
         clusters=reports,
+        elapsed_seconds=round(time.time() - _fleet_start, 1),
     )
 
     # Save reports

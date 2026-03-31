@@ -15,7 +15,8 @@ class MultiClusterReport:
     timestamp: datetime
     overall_severity: HealthSeverity
     clusters: List[HealthCheckReport]
-    report_path: str = ""  # JSON path; .html and .md written alongside
+    report_path: str = ""     # JSON path; .html and .md written alongside
+    elapsed_seconds: float = 0.0  # total wall-clock time for the fleet run
 
     @property
     def cluster_count(self) -> int:

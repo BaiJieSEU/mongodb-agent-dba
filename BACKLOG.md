@@ -1,6 +1,6 @@
 # MongoDB DBA Agent — Product Backlog
 
-Updated: 2026-03-19 | Format: Epic → Story → Acceptance criteria
+Updated: 2026-03-29 | Format: Epic → Story → Acceptance criteria
 
 Priority: **P0** = must-have for health-check goal | **P1** = high value | **P2** = medium | **P3** = nice-to-have
 Size: **S** < 1 day | **M** 1–3 days | **L** 3–7 days | **XL** > 7 days
@@ -52,15 +52,15 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-052 | Immutable audit trail | P2 | S | 6 | 🔲 |
 | BL-081 | HTML report — zero-duplication layout | P1 | S | 7 | ✅ Done |
 | BL-082 | HTML report — sidebar & content restructure | P1 | S | 7 | ✅ Done |
-| BL-083 | HTML report — collapsible Details panel per section | P1 | S | 7 | 🔲 |
+| BL-083 | HTML report — collapsible Details panel per section | P1 | S | 7 | ✅ Done |
 | BL-084 | Metric card tooltips with LLM-contextual explanation | P1 | M | 7 | ✅ Done |
-| BL-085 | Query Performance findings — structured readable layout | P1 | S | 7 | 🔲 |
-| BL-088 | Score & ticket tiering table in Markdown config | P1 | S | 3 | 🔲 |
-| BL-089 | Ticket priority driven by section consequence tier | P1 | S | 3 | 🔲 |
-| BL-090 | AI summary, score, and ticket priority alignment | P1 | S | 3 | 🔲 |
-| BL-091 | Fleet summary tab for multi-cluster reports | P1 | M | 7 | 🔲 |
+| BL-085 | Query Performance findings — structured readable layout | P1 | S | 7 | ✅ Done |
+| BL-088 | Score & ticket tiering table in Markdown config | P1 | S | 3 | ✅ Done |
+| BL-089 | Ticket priority driven by section consequence tier | P1 | S | 3 | ✅ Done |
+| BL-090 | AI summary, score, and ticket priority alignment | P1 | S | 3 | ✅ Done |
+| BL-091 | Fleet summary tab for multi-cluster reports | P1 | M | 7 | ✅ Done |
 | BL-092 | Scoring system audit & simplification | P1 | M | 3 | ✅ Done |
-| BL-093 | Slow query threshold: count → % of total queries | P1 | M | 3 | 🔲 |
+| BL-093 | Slow query threshold: count → % of total queries | P1 | M | 3 | ✅ Done |
 | BL-086 | Metric tooltip context for non-breached signals (page faults, throughput) | P2 | S | 7 | 🔲 |
 | BL-087 | OM version and agent version in report header | P2 | S | 7 | ✅ Done |
 | BL-061 | Markdown report output | P2 | S | 7 | ✅ Done |
@@ -74,26 +74,42 @@ When adding or updating an item, re-insert it in the correct position — do not
 | BL-096 | Exact duplicate index detection | P1 | S | 1 | ✅ Done |
 | BL-097 | Active long-running operations signal | P1 | S | 1 | ✅ Done |
 | BL-100 | Profiler slowms as explicit report signal | P1 | S | 1 | ✅ Done |
-| BL-102 | Aggregation pipeline anti-patterns in Query Performance | P1 | M | 1 | 🔲 |
-| BL-106 | Backup configuration detection | P1 | M | 9 | 🔲 |
-| BL-107 | Restore readiness check | P1 | M | 9 | 🔲 |
-| BL-098 | Page fault rate / trend signal | P2 | S | 1 | 🔲 |
-| BL-099 | Network throughput signals (bytesIn/Out) | P2 | S | 1 | 🔲 |
-| BL-101 | Index cardinality / quality check | P2 | M | 1 | 🔲 |
-| BL-103 | Query plan cache hit rate | P2 | M | 1 | 🔲 |
+| BL-102 | Aggregation pipeline anti-patterns in Query Performance | P1 | M | 1 | ✅ Done |
+| BL-106 | Backup configuration detection | P1 | M | 9 | ✅ Done |
+| BL-107 | Restore readiness check | P1 | M | 9 | ✅ Done |
+| BL-098 | Page fault rate / trend signal | P2 | S | 1 | ✅ Done |
+| BL-099 | Network throughput signals (bytesIn/Out) | P2 | S | 1 | ✅ Done |
+| BL-101 | Index cardinality / quality check | P2 | M | 1 | ✅ Done |
+| BL-103 | Query plan cache hit rate | P2 | M | 1 | ✅ Done |
+| BL-124 | WiredTiger engine pressure — tickets & dirty ratio | P1 | S | 1 | 🔲 |
+| BL-125 | Plan cache stats audit on low hit rate | P1 | M | 1 | 🔲 |
 | BL-104 | Batch vs 24×7 workload detection | P2 | M | 1 | 🔲 |
 | BL-105 | Collection-level read/write ratio | P2 | M | 1 | 🔲 |
 | BL-109 | Monitoring alert coverage quality | P2 | M | 9 | 🔲 |
 | BL-108 | Hot shards + chunk distribution (conditional) | P2 | L | 9 | 🔲 |
+| BL-123 | OM-based cluster auto-discovery — bootstrap cluster list from OM API | P1 | M | 9 | 🔲 |
 | BL-042 | Drop unused index (approval-gated) | P3 | S | 5 | 🔲 |
 | BL-053 | MongoDB Atlas integration | P3 | L | 6 | 🔲 |
+| BL-110 | Copy-to-clipboard for Action Plan commands | P1 | S | 10 | ✅ Done |
+| BL-111 | Active Alerts — jump-to-section links | P1 | S | 10 | ✅ Done |
+| BL-112 | Fleet summary — aggregate fleet score + critical cluster banner | P1 | S | 10 | ✅ Done |
+| BL-113 | Score ring at top of sidebar (above nav) | P1 | S | 10 | ✅ Done |
+| BL-114 | Trend arrows on metric cards (vs prior baseline run) | P1 | M | 10 | ✅ Done |
+| BL-115 | Replication lag human-readable duration (Xh Ym) | P1 | S | 10 | ✅ Done |
+| BL-116 | Action Plan — group recommendations by priority tier | P1 | S | 10 | ✅ Done |
+| BL-117 | Fix `<details>` accessibility — inline summary text, not CSS `::before` | P1 | S | 10 | ✅ Done |
+| BL-118 | Light mode / auto theme (prefers-color-scheme) | P2 | M | 10 | ✅ Done |
+| BL-119 | Print-friendly CSS for single-cluster report | P2 | S | 10 | ✅ Done |
+| BL-120 | Metric headroom indicator — safe distance to threshold on OK cards | P2 | S | 10 | 🔲 |
+| BL-121 | Placeholder sections — collapse or visually de-emphasise when OM not configured | P2 | S | 10 | ✅ Done |
+| BL-122 | Historical score sparkline per cluster in Fleet Summary | P2 | M | 10 | ✅ Done |
 
-**Done:** 34 items (BL-020, BL-001, BL-002, BL-003, BL-004, BL-060, BL-010, BL-032, BL-061, BL-023, BL-014, BL-009, BL-034, BL-070, BL-030, BL-050, BL-076, BL-078, BL-079, BL-080, BL-021, BL-006, BL-007, BL-081, BL-082, BL-084, BL-085, BL-087, BL-092, BL-094, BL-095, BL-096, BL-097, BL-100)
+**Done:** 64 items (BL-020 through BL-123, see full list in git log)
 **Partial:** 1 item (BL-071 — LLM+MongoDB env vars done, full coverage pending)
 **P0:** 1 remaining — scheduler (BL-011)
-**P1:** 32 items — high-value once P0 is in place (includes BL-088–BL-093, BL-102, BL-106–BL-107)
-**P2–P3:** 16 items — important but not blocking (includes BL-098–BL-099, BL-101, BL-103–BL-105, BL-108–BL-109)
-**Total:** 69 items across 9 epics (29 done, 1 partial, 39 remaining)
+**P1:** 17 items remaining
+**P2–P3:** 11 items remaining
+**Total:** 86 items across 10 epics (57 done, 1 partial, 28 remaining)
 
 ---
 
@@ -2046,5 +2062,519 @@ note as covered. If no breach in this run, mark as "untested (metric OK this run
 - Severity WARNING if ≥ 1 critical metric has no alert coverage
 - `SECTION_TIER["Alerting Coverage"] = "P2"` added to `html_reporter.py`
 - Section gracefully skips if `config/alert_checklist.yaml` is absent
+
+---
+
+## Epic 10 — Report UI/UX Polish
+
+*Goal: apply professional database health-check UI/UX standards — the report must be
+as readable as Datadog or PagerDuty, actionable at a glance, and accessible to
+non-expert stakeholders.*
+
+Review basis: full HTML audit of `fleet_2026-03-29_08-24-11.html` and `html_reporter.py`
+against Datadog, New Relic, and MongoDB Atlas UI conventions (2026-03-29).
+
+---
+
+### BL-110 · Copy-to-clipboard for Action Plan commands
+**Priority:** P1 | **Size:** S
+
+**Story:** As a DBA, I want a one-click copy button next to each `createIndex` /
+`dropIndex` command in the Action Plan table so I can paste it directly into mongosh
+without selecting monospace text by hand.
+
+**Current state:** Commands are rendered in `<code class="rec-action">` with
+`overflow-wrap: break-word` — readable but not interactive.
+
+**Design:**
+- Each action cell gets a small copy icon (📋 SVG or Unicode) absolutely positioned
+  top-right of the `<code>` block
+- `navigator.clipboard.writeText()` on click; button text briefly changes to "✓ Copied"
+  for 1.5 s then reverts (pure JS, no dependencies)
+- Graceful degradation: button hidden via `@supports` if Clipboard API unavailable
+
+**Acceptance criteria:**
+- Copy button renders in Action Plan table alongside every action cell
+- Click copies the raw command text (no surrounding HTML) to clipboard
+- "Copied ✓" feedback lasts 1.5 s
+- Works in Safari, Chrome, Firefox latest
+- No visible button when `window.isSecureContext === false` (http)
+
+---
+
+### BL-111 · Active Alerts — jump-to-section links
+**Priority:** P1 | **Size:** S
+
+**Story:** As a DBA reviewing the report, I want each alert card in the Active Alerts
+section to have a "View details →" link that scrolls directly to the corresponding
+section card so I can immediately investigate without scrolling manually.
+
+**Current state:** Alert boxes show section name and first finding but no navigation
+link. The sidebar nav provides a global list, but not from within each alert.
+
+**Design:**
+- Each `.alert` box gets a small "View section →" anchor at bottom-right corner
+- Anchor `href` points to the section's anchor id (e.g., `#sec-replication`)
+- Smooth scroll via existing `scrollIntoView({ behavior: 'smooth' })` JS
+- Text: `View →` (compact), coloured with the alert's severity colour
+
+**Acceptance criteria:**
+- Every non-OK section alert box has a functioning "View →" link
+- Click scrolls the page to the correct section card
+- Link is visually consistent (uses `var(--t3)` normal, severity colour on hover)
+
+---
+
+### BL-112 · Fleet summary — aggregate fleet score + critical cluster banner
+**Priority:** P1 | **Size:** S
+
+**Story:** As a fleet operator, I want a prominently displayed overall fleet health
+score and a banner that lists any CRITICAL clusters at the top of the Fleet Summary
+tab so I know immediately whether I need to act.
+
+**Current state:** Fleet summary shows a table sorted by score, but there is no
+aggregate fleet score or "X clusters need immediate attention" call-out.
+
+**Design — two additions to `_build_summary_panel()`:**
+
+1. **Fleet aggregate score** — `min(scores)` for worst-case, displayed next to the
+   title with the `.fleet-score-{ok|warn|crit}` badge already defined in CSS
+
+2. **Critical banner** — if any cluster is CRITICAL, show a red alert bar above the
+   table: `"⚠ 1 cluster requires immediate attention — {name}: {top_issue}"`
+
+**Acceptance criteria:**
+- Fleet aggregate score badge visible in summary header
+- Critical banner appears when ≥ 1 cluster is CRITICAL; hidden otherwise
+- Both elements update when switching between fleet runs (JS state preserved)
+- No change to per-cluster view
+
+---
+
+### BL-113 · Score ring at top of sidebar (above nav groups)
+**Priority:** P1 | **Size:** S
+
+**Story:** As a DBA reading the report, I want the health score prominently displayed
+near the top of the sidebar (below cluster name) so I can see the verdict immediately
+without scrolling to the bottom of the nav.
+
+**Current state:** The score ring is in `.sidebar-score` at the bottom of the sidebar,
+appended with `margin-top: auto`. On long reports with many nav items, the score may
+be pushed off-screen or require scrolling.
+
+**Design:**
+- Move the `.sidebar-score` block to immediately below `.sidebar-top`
+  (before the nav groups)
+- Remove `margin-top: auto`; add `margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 14px;`
+- Increase score ring from 48px to 56px; font-size from 14px to 16px for legibility
+- Keep the ring at the bottom of the sidebar as a secondary visual if room permits,
+  OR remove the duplicate
+
+**Acceptance criteria:**
+- Score ring visible in sidebar without scrolling on a standard 1080p display
+- Ring size 56px, score number 16px, both readable against dark background
+- No overlap with cluster name / timestamp above
+
+---
+
+### BL-114 · Trend arrows on metric cards (vs prior baseline run)
+**Priority:** P1 | **Size:** M
+
+**Story:** As a DBA, I want each metric card to show a small trend arrow (↑↓→)
+comparing the current value to the previous run's baseline mean so I can spot
+deteriorating metrics before they breach thresholds.
+
+**Current state:** `BaselineManager` stores rolling history but the report only uses
+it for severity assessment — the raw direction is not surfaced in the UI. Metric cards
+show static value + threshold with no historical context.
+
+**Design:**
+- Add optional `trend` field to `Signal` dataclass: `"up" | "down" | "stable" | None`
+- `HealthCheckRunner` sets `sig.trend` when the metric is tracked by `BaselineManager`
+  and `run_count >= COLD_START_RUNS`:
+  - `up` if current > baseline_mean × 1.1
+  - `down` if current < baseline_mean × 0.9
+  - `stable` otherwise
+- HTML renderer adds a tiny trend span to `.metric-sub`:
+  - ↑ red for `higher-is-worse` up, green for `lower-is-worse` up
+  - ↓ green for `higher-is-worse` down, red for `lower-is-worse` down
+  - → gray for stable
+- During cold-start period, trend is None and no arrow is shown
+
+**Acceptance criteria:**
+- Trend arrow visible on metric cards for tracked metrics after ≥ 3 runs
+- Arrow colour reflects whether the direction is good or bad for that metric
+- Cold-start clusters show no trend arrows
+- Signal dataclass change is backwards-compatible (trend defaults to None)
+
+---
+
+### BL-115 · Replication lag human-readable duration
+**Priority:** P1 | **Size:** S
+
+**Story:** As a DBA, I want the replication lag signal to display as "2h 30m" or
+"45s" rather than raw seconds so I can instantly gauge urgency without mental
+arithmetic.
+
+**Current state:** `replication_lag_max_sec` signal value is e.g. `9000` with unit
+`seconds`. The metric card shows `9,000 seconds`.
+
+**Implementation:**
+- Add a `_fmt_duration(seconds: int) -> str` helper to `health_check_runner.py`:
+  - < 60 → `"{s}s"`
+  - < 3600 → `"{m}m {s}s"`
+  - else → `"{h}h {m}m"`
+- Use this as the `unit` field (or a separate `display_value` field on Signal)
+- Alternatively: format in the HTML renderer's `_fmt()` when `sig.unit == "seconds"` and
+  `sig.name == "replication_lag_max_sec"` — simpler, no model change
+
+**Acceptance criteria:**
+- Metric card shows "2h 30m" for 9000 seconds, "45s" for 45 seconds
+- Threshold comparison still uses raw seconds internally
+- Findings text also uses formatted duration
+
+---
+
+### BL-116 · Action Plan — group recommendations by priority tier
+**Priority:** P1 | **Size:** S
+
+**Story:** As a DBA, I want the Action Plan table to visually group recommendations
+by priority tier (P0/P1/P2/P3/P4) with a tier header row so I can immediately focus
+on critical items without scanning the entire list.
+
+**Current state:** Recommendations are sorted by priority but rendered as a flat list
+of table rows with no tier-level grouping. With 5+ recommendations it becomes a wall
+of rows.
+
+**Design:**
+- Insert a shaded `<tr>` separator row at each tier boundary:
+  `<tr class="tier-header"><td colspan="5"><span class="rec-p rp{N}">P{N}</span> {tier_label} — {consequence}</td></tr>`
+- CSS for `.tier-header td`: `background: var(--surface2); padding: 6px 10px;`
+- Only show tier header rows for tiers that have ≥ 1 recommendation
+- Consequence text from `_TIER_LABEL` dict
+
+**Acceptance criteria:**
+- Tier header rows visible between P0→P1, P1→P2 boundaries etc.
+- Tiers with no recommendations produce no header row
+- Table still scrollable horizontally on narrow viewports
+
+---
+
+### BL-117 · Fix `<details>` accessibility — inline summary text, not CSS `::before`
+**Priority:** P1 | **Size:** S
+
+**Story:** As a screen reader user, I want the collapsible "Show details / Hide
+details" toggle in section cards to be readable by assistive technology so the report
+is WCAG 2.1 AA accessible.
+
+**Current state:** `_section_card()` emits `<details><summary></summary>...</details>`
+with an empty `<summary>`. The visible "▶ Show details" text is injected by
+`.findings-details > summary::before { content: "▶  Show details"; }`. Screen readers
+read `<summary>` as empty and the `::before` content may or may not be read depending
+on the AT.
+
+**Fix:**
+- Change `f'<summary></summary>'` to `f'<summary>Show {len(detail_lines)} detail{"s" if len(detail_lines) != 1 else ""}</summary>'`
+- Remove `::before` / `[open]::before` content CSS
+- Add `list-style: none` to suppress the default triangle marker
+- Replace with an explicit `::marker { content: ""; }` + custom arrow using
+  `.findings-details > summary::after` (or inline SVG in `<summary>`)
+- Add `aria-label` to `<details>` for AT context
+
+**Acceptance criteria:**
+- `<summary>` has meaningful text content ("Show 3 details" / "Hide 3 details")
+- Toggle text updates between open/closed states via JS `toggle` event listener
+- CSS `::before` content removed (no duplication)
+- VoiceOver / NVDA reads the toggle correctly
+
+---
+
+### BL-118 · Light mode / auto theme (prefers-color-scheme)
+**Priority:** P2 | **Size:** M
+
+**Story:** As a DBA sharing the report with a manager or customer who uses a light OS
+theme, I want the report to automatically switch to a high-contrast light colour
+palette so it is readable without a dark display.
+
+**Current state:** The report uses a single fixed dark theme with no media query.
+
+**Design:**
+- Add `@media (prefers-color-scheme: light)` block to `_CSS` overriding all CSS
+  variables:
+  ```
+  --bg: #f8fafc;  --surface: #ffffff;  --surface2: #f1f5f9;
+  --border: rgba(0,0,0,0.09);  --border-em: rgba(0,0,0,0.18);
+  --t1: #0f172a;  --t2: #475569;  --t3: #94a3b8;
+  --red: #dc2626;  --amber: #d97706;  --green: #059669;  --blue: #2563eb;
+  ```
+- All severity tints (`--red-bg`, `--amber-bg`, etc.) also adjusted for light mode
+- Manual toggle button (🌙/☀) in the sticky bar to override system preference;
+  stores choice in `localStorage`
+
+**Acceptance criteria:**
+- Report renders correctly in both dark and light OS themes
+- All text passes WCAG AA contrast ratio in both modes
+- Manual toggle persists across page reload (localStorage)
+- Code blocks and metric values remain legible in light mode
+
+---
+
+### BL-119 · Print-friendly CSS for single-cluster report
+**Priority:** P2 | **Size:** S
+
+**Story:** As a DBA, I want to print or save-as-PDF the health check report and get a
+clean, readable document with no sidebar, no sticky bars, and no dark background so I
+can share it with stakeholders who prefer a PDF attachment.
+
+**Current state:** No `@media print` rules exist. Printing produces a dark-background
+document with the sidebar cramping the main content area.
+
+**Design — `@media print` rules:**
+- `.sidebar`, `.sticky-bar`, `.cluster-tabs` → `display: none`
+- `.layout` → `display: block`
+- `.main` → `max-width: none; padding: 20px`
+- Body `background` → white; `color` → black
+- Section cards: remove coloured left-border; replace with black top-border
+- Metric grid: 3-column fixed layout
+- Add `page-break-inside: avoid` on `.section`, `.rec-item`
+- Action Plan table: full width, no overflow
+- Footer: `display: block; text-align: left`
+
+**Acceptance criteria:**
+- `File → Print → Save as PDF` produces a clean black-on-white document
+- All sections, metric grids, and recommendations are visible
+- No sidebar, no sticky bar, no dark backgrounds
+- Tested in Chrome and Safari print preview
+
+---
+
+### BL-120 · Metric headroom indicator — safe distance to threshold on OK cards
+**Priority:** P2 | **Size:** S
+
+**Story:** As a DBA, I want metric cards that are currently healthy to show how much
+headroom remains before they breach their threshold so I can identify metrics trending
+toward a problem before they hit WARNING.
+
+**Current state:** OK metric cards show value and unit. The threshold is only shown
+when breached. A metric at 78% disk with an 80% warning threshold looks identical to
+a metric at 30% disk — no sense of proximity.
+
+**Design:**
+- For OK metrics with a threshold, add a thin progress bar below the value:
+  `width = (value / threshold) × 100%` (capped at 99%)
+  - 0–60% → `var(--green-border)`
+  - 60–80% → `var(--amber-border)`
+  - 80–99% → coloured amber/red to signal "approaching threshold"
+- For `lower-is-worse` metrics (cache hit ratio, oplog window), invert: bar fills
+  from right, shows safe margin above threshold
+- Progress bar: 3px tall, border-radius 2px, full-width within the card
+- Add small text below: `{headroom}% headroom` or `{delta} below threshold`
+
+**Acceptance criteria:**
+- Progress bar visible on all non-breached metrics that have a threshold
+- Bar colour transitions correctly across the three zones
+- `lower-is-worse` metrics show inverted representation
+- Breached metrics retain existing red/amber border — no progress bar
+- Renders correctly at minmax(155px) card width (no overflow)
+
+---
+
+### BL-121 · Placeholder sections — collapse or visually de-emphasise when OM not configured
+**Priority:** P2 | **Size:** S
+
+**Story:** As a DBA running without Ops Manager, I want the "Connections &
+Concurrency" and "Infrastructure" sections (which are OM-dependent) to be visually
+de-emphasised or collapsed by default so they don't consume space and draw attention
+away from actionable sections.
+
+**Current state:** Placeholder sections render as full-height section cards with
+"Not available" tag, a bullet list of unavailable metrics, and a backlog reference.
+They occupy as much vertical space as real sections and appear in the nav with a grey
+dot — fine for development visibility but visually noisy for production reports.
+
+**Design:**
+- Replace the current placeholder card with a compact single-line entry:
+  `<div class="placeholder-stub">Connections & Concurrency — not available (OM required) <a href="#" class="pl-expand">Show details</a></div>`
+- Clicking "Show details" expands inline to the current full placeholder content
+- Nav sidebar: greyed-out nav items for placeholder sections, smaller font, italics,
+  no dot — clearly secondary
+- `--placeholder-stub-bg: var(--surface)` with dashed border for quick visual ID
+
+**Acceptance criteria:**
+- Placeholder sections default to single-line stub on page load
+- "Show details" expands to full placeholder content
+- Nav items for placeholder sections are visually distinct from real sections
+- Layout change does not affect sections that have real data
+
+---
+
+### BL-122 · Historical score sparkline per cluster in Fleet Summary
+**Priority:** P2 | **Size:** M
+
+**Story:** As a fleet operator, I want each cluster row in the Fleet Summary table to
+show a small sparkline of the last 5–10 health scores so I can see at a glance whether
+a cluster is stable, improving, or trending downward.
+
+**Current state:** The Fleet Summary table shows only the current run's score. There
+is no historical context. `BaselineManager` stores per-run metrics but not the
+aggregate score per run.
+
+**Design:**
+- Store aggregate health score in `agent_memory.health_baselines` alongside metric
+  history: add `"score_history": [list of last 10 scores]` to the baseline document
+- `_build_summary_panel()` reads score history from report metadata or from a separate
+  call to `BaselineManager`
+- Render a 60×20px inline SVG sparkline in the Score column: polyline connecting the
+  last N scores, coloured green/amber/red based on the trend direction
+- Latest score shown as the text value next to the sparkline
+
+**Implementation note:** Score history requires `HealthCheckRunner` to pass the
+computed score to `BaselineManager.record_from_report()`, or a second upsert after
+`_health_score()` is called.
+
+**Acceptance criteria:**
+- Score sparkline visible in Fleet Summary after ≥ 2 runs per cluster
+- Sparkline renders within 60×20px without distorting the table row height
+- Flat or rising line coloured green; declining line coloured amber/red
+- Fallback: current score as plain text if < 2 history points
+
+---
+
+### BL-123 · OM-based cluster auto-discovery
+**Priority:** P1 | **Size:** M | **Epic:** 9
+
+**Story:** As a PS engineer deploying the agent at a customer site, I want the agent
+to discover all monitored clusters automatically from Ops Manager so I only need to
+provide the OM URL and API credentials — no manual YAML cluster list required.
+
+**Customer ask reduced to:**
+1. OM URL (e.g. `http://ops-manager.internal:8080`)
+2. OM API keypair — two options:
+   - **Global** (preferred for PS): Admin → General → Global API Keys → Create, role `Global Read Only` — works across all projects with no per-project setup
+   - **Project-scoped**: Account → Access Manager → API Keys, role `Project Read Only` — must be added to each project individually
+3. Network path to OM (direct, VPN, or bastion tunnel)
+
+**Discovery flow:**
+
+```
+GET /api/public/v1.0/groups
+  → for each group:
+GET /api/public/v1.0/groups/{id}/hosts
+  → extract: hostname, port, replicaSetName, typeName (PRIMARY/SECONDARY)
+  → build URI: mongodb://{primary_host}:{port}/?replicaSet={rs}&directConnection=true
+  → upsert into config monitored_clusters[]
+```
+
+**Implementation:**
+- New `src/utils/om_discovery.py` — `OpsManagerDiscovery(url, public_key, private_key)`
+  - `discover_clusters() -> List[ClusterConfig]`
+  - Uses `requests` with HTTP Digest auth (already a dependency via mcp)
+  - Groups hosts by `replicaSetName`; picks `typeName == "PRIMARY"` as the connection target
+  - Falls back to any available member if no PRIMARY found (e.g. cluster mid-election)
+- `config_loader.py` gains `--discover-from-om` flag (and `OM_AUTO_DISCOVER=true` env var)
+  - When set, calls `OpsManagerDiscovery.discover_clusters()` and merges into `monitored_clusters`
+  - Discovered clusters tagged `{om: true}` to distinguish from manually configured ones
+  - Writes discovered list to `config/agent_config.yaml` (with confirmation prompt in interactive mode)
+- `main_agentic.py`: if `monitored_clusters` is empty and OM is configured, auto-discover
+  before running health check
+
+**Acceptance criteria:**
+- `python src/main_agentic.py --health-check --discover-from-om` discovers all RS primaries
+  from the configured OM instance without any manual cluster config
+- Outputs discovered cluster list to console before starting health check
+- Graceful failure: if OM unreachable or 401, falls back to YAML-configured clusters with a warning
+- Duplicate URIs are not added (idempotent merge)
+- Works with OM 6.0 and 7.0 API; Atlas-managed deployments not in scope (see BL-053)
+
+---
+
+### BL-124 · WiredTiger engine pressure — tickets & dirty ratio
+**Priority:** P1 | **Size:** S | **Epic:** 1 | **Section:** §8 Operations
+
+**Story:** As a DBA, I want the Operations section to surface WiredTiger engine pressure
+signals (read/write ticket availability and dirty cache ratio) so I can detect imminent
+throughput collapse even when CPU and memory look normal.
+
+**Context:** WiredTiger uses a ticket-based concurrency control (default 128 read + 128
+write). When available tickets approach 0, new operations queue and the database stalls.
+Similarly, when dirty data exceeds ~20% of the WT cache, user threads are drafted into
+page eviction, causing severe latency spikes. Both conditions are invisible to CPU/memory
+monitoring and are a leading cause of unexplained production slowdowns.
+
+Note: §10 Connections already reports `tickets_reads` and `tickets_writes` as remaining
+counts, but they lack the engine-pressure framing and dirty ratio context. This BL
+consolidates engine health into §8 where serverStatus data is already available.
+
+**Data source:** `serverStatus` — already fetched in `_section_operations()`.
+
+**serverStatus paths:**
+- `wiredTiger.concurrentTransactions.read.available` — remaining read tickets
+- `wiredTiger.concurrentTransactions.write.available` — remaining write tickets
+- `wiredTiger.concurrentTransactions.read.totalTickets` — max read tickets (128 default)
+- `wiredTiger.concurrentTransactions.write.totalTickets` — max write tickets (128 default)
+- `wiredTiger.cache["tracked dirty bytes in the cache"]` — current dirty bytes
+- `wiredTiger.cache["maximum bytes configured"]` — max cache size
+
+**Implementation:**
+- Compute `dirty_ratio = dirty_bytes / max_bytes`
+- Compute `read_ticket_pct = read_available / read_total * 100`
+- Compute `write_ticket_pct = write_available / write_total * 100`
+- Add signals: `wt_dirty_ratio_pct`, `wt_read_tickets_available`, `wt_write_tickets_available`
+- Add to `_BELOW_THRESHOLD_IS_BAD` in all 3 files (ticket signals — low is bad)
+
+**Acceptance criteria:**
+- Signal `wt_dirty_ratio_pct` with threshold 20%; WARNING at >5%, CRITICAL at >20%
+- Signal `wt_read_tickets_available` with threshold 10; WARNING at <20, CRITICAL at <10
+- Signal `wt_write_tickets_available` with threshold 10; WARNING at <20, CRITICAL at <10
+- Finding text explains the consequence: "User threads participate in eviction above 20%
+  dirty ratio, causing request latency spikes"
+- Recommendation generated when CRITICAL: "Investigate write-heavy workloads or increase
+  WiredTiger cache size"
+- Gracefully skips if `wiredTiger` key is absent from serverStatus (e.g. non-WT engine)
+
+---
+
+### BL-125 · Plan cache stats audit on low hit rate
+**Priority:** P1 | **Size:** M | **Epic:** 1 | **Section:** §5 Query Performance / §8 Operations
+
+**Story:** As a DBA, when the plan cache hit rate is low (<80%), I want the report to
+automatically drill into `$planCacheStats` for the affected collections and identify
+whether query shape instability or cache eviction is the root cause, so I get an
+actionable diagnosis instead of just a metric.
+
+**Context:** BL-103 added `plan_cache_hit_rate_pct` to §8 Operations. A 0% hit rate
+means every query re-plans — this is expensive and often caused by unstable query shapes
+(e.g. dynamically constructed filters with varying field sets) or excessive candidate
+plans triggering cache eviction. The raw percentage alone doesn't tell the DBA *why*.
+
+**Data source:** `db.<collection>.aggregate([{$planCacheStats: {}}])` — available since
+MongoDB 4.2, well within our 8.0 target. Requires the `planCacheRead` privilege
+(included in the `dbAdmin` and `clusterMonitor` roles).
+
+**Trigger condition:** `plan_cache_hit_rate_pct < 80` (already detected in §8).
+
+**Data flow:** §5 Query Performance already identifies the top slow collections via
+`_top_slow_collections(slow_queries)`. These are the natural candidates for plan cache
+audit — no additional collection discovery needed.
+
+**Implementation:**
+- When plan cache hit rate < 80%, call `$planCacheStats` on top 3 slow collections
+  (from §5 slow query list)
+- For each collection, extract:
+  - Total cached plan entries
+  - Entries with >3 candidate plans (indicates query optimizer indecision)
+  - Most common query shape hash (indicates which shapes dominate the cache)
+- Add finding to §8 Operations or §5 Query Performance (TBD — wherever it fits better)
+- Use MCP `aggregate` tool (already available) — no new data access path needed
+
+**Acceptance criteria:**
+- When `plan_cache_hit_rate_pct < 80`, report includes plan cache audit for top 3 slow
+  collections
+- Finding identifies: number of cached entries, entries with >3 candidate plans,
+  and whether cache is being evicted (entries < expected based on query diversity)
+- Recommendation: "Stabilise query shapes" if high candidate plan count; "Increase
+  planCacheSize" if eviction detected; "Review index strategy" if plans are suboptimal
+- Gracefully skips if `$planCacheStats` returns an error (insufficient privileges)
+- Does NOT run when hit rate >= 80% (avoid unnecessary overhead)
 
 ---
